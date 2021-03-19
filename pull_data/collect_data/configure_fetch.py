@@ -1,9 +1,6 @@
 import os
 from dotenv import load_dotenv, find_dotenv
 from datetime import *
-from alpha_vantage.cryptocurrencies import CryptoCurrencies
-import pandas as pd
-from pprint import pprint
 
 load_dotenv(find_dotenv())
 
@@ -70,7 +67,7 @@ class SetInterval(object):
 class Configs:
     def __init__(self):
         self.api_key = ""
-        self.forma = 'pandas'
+        self.forma = "pandas"
 
     ##########################################
     ##########################################
@@ -78,7 +75,7 @@ class Configs:
         """ Returns current stored value for 'api_key' """
         return self.api_key
 
-    def get_formatting(self):
+    def get_forma(self):
         """ Default data formatting is set to Pandas-DataFrame object """
         return self.forma
 
@@ -86,11 +83,11 @@ class Configs:
     ##########################################
     def set_api_key(self, pick_api):
         """ Pass api key .env variable that you wish to connect to """
-        self.api_key = os.getenv(pick_api)
+        self.api_key = os.getenv(f'{pick_api}')
 
-    def set_formatting(self, user_format):
-        """ Default value is pandas dataframe structures """
-        self.forma = user_format
+    # def set_forma(self, user_format):
+    #     """ Default value is pandas dataframe structures """
+    #     self.forma = user_format
 
     ##########################################
     ##########################################
@@ -112,62 +109,28 @@ class Configs:
 
 #########################################################################
 #########################################################################
-class FetchData(Configs):
+class StepSize:
     def __init__(self):
-        super().__init__()
+        self.symbol = ""
+        self.time_unit = ""
+        self.df_size = ""
 
+    def get_symbol(self):
+        return self.symbol
 
-#########################################################################
-#########################################################################
-class PushToDir:
-    def __init__(self):
-        self.reset = os.getcwd()
-        self.dump_fin = os.getenv('TECH_DATA')[2:-1]
-        self.dump_btc = os.getenv('BTC_DATA')[2:-1]
-        self.export_data = pd.DataFrame()
-        self.daters_name = "daters.csv"
+    def get_unit(self):
+        return self.time_unit
 
-    ##########################################
-    ##########################################
-    def get_export_data(self):
-        return self.export_data
-
-    def get_file_name(self):
-        return self.daters_name
-
-    def get_dump_fin(self):
-        return self.dump_fin
-
-    def get_dump_btc(self):
-        return self.dump_btc
-
-    def get_reset(self):
-        return self.reset
+    def get_size(self):
+        return self.df_size
 
     ##########################################
     ##########################################
-    def set_export_data(self, daters):
-        """ Call this method passing it the data object you wish to export """
-        self.export_data = daters
+    def set_symbol(self, symbol):
+        self.symbol = symbol
 
-    def set_file_name(self, file_name):
-        self.daters_name = file_name
+    def set_units(self, units):
+        self.time_unit = units
 
-    def set_dump_fin(self, user_fin_dump):
-        """ Best practice is creating an envVar which points to the folder you wish to store the data """
-        self.dump_fin = user_fin_dump
-
-    def set_dump_btc(self, user_btc_dump):
-        """ Best practice is creating an envVar which points to the folder you wish to store the data """
-        self.dump_btc = user_btc_dump
-
-    ##########################################
-    ##########################################
-    def exporter(self):
-        try:
-            os.chdir(os.getenv("PUSH_DATA"))
-            self.export_data.to_csv(self.get_file_name())
-            os.chdir(self.get_reset())
-        except FileNotFoundError or NotADirectoryError or ValueError:
-            pass
-
+    def set_size(self, size):
+        self.df_size = size
