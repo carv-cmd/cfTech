@@ -6,7 +6,7 @@ import threading
 import time
 
 
-def set_interval(interval, times=-1):
+def set_interval(interval, times=-1.0):
     """ This is the actual decorator w/ fixed interval and times parameters """
     def outer_wrap(function):
         """ This will be the function called """
@@ -29,16 +29,33 @@ def set_interval(interval, times=-1):
     return outer_wrap
 
 
-if __name__ == "__main__":
-    # Set the wait time for repeat
-    @set_interval(1)
+def thread_control():
+    pass
+
+
+def thread_test(test_word='bar', period=2.0):
+    """
+    Default: Set the wait time for repeat and how long to repeat
+    OptionalConfig: set the wait time and "number of times to repeat"
+
+            @set_interval(1, 3)
+            def foo(a):
+                print(a)
+            foo('\nTHREADING\n')
+
+    """
+    @set_interval(interval=period)
     def foo(a):
         print(a)
 
-    stopping = foo('bar')
+    stopping = foo(test_word)
 
     time.sleep(360)
     stopping.set()
 
+
+if __name__ == "__main__":
+    thread_test('foo != bar')
+
 else:
-    print(f'\nCalled Helper Module: "{__name__}"')
+    print(f'\nInitiated Helper Module: "{__name__}"')
