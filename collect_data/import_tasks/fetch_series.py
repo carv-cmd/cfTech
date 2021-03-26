@@ -1,6 +1,6 @@
 from api_config import *
-from pprint import pprint
 from alpha_vantage.timeseries import TimeSeries
+from push_local import *
 
 
 class SeriesCall(KeyConfig):
@@ -50,28 +50,37 @@ def quick_set(**kwargs):
     return setup_config()
 
 
-def caller(tik):
+def caller(tik, **kwargs):
     io = quick_set(**kwargs)
     io.set_symbol(tik)
     return io
 
 
-#########################################################################
-#########################################################################
-kwargs = {"api_key": 'ALPHAVANTAGE_API_KEY',
-          "interval": '1min',
-          "output": 'compact',
-          "forma": 'pandas'}
+def setup_call():
+    kwargs = {"api_key": 'ALPHAVANTAGE_API_KEY',
+              "interval": '30min',
+              "output": 'compact',
+              "forma": 'pandas'}
+
+    return caller(tick, **kwargs)
 
 
+#########################################################################
+#########################################################################
 if __name__ == "__main__":
-    tick_list = ['AAPL', 'NVDA']  # , 'AMD', 'TSLA']
-
+    tick_list = ['NVDA']  # , 'AAPL', 'AMD']  # 'TSLA']
     for tick in tick_list:
-        calling = caller(tick)
-        calling.initialize_fetch()
-        a1, a2 = calling.fetch_monthly()
-        print('\n-----------------------------------------------------------------------')
-        pprint(a2)
-        print()
-        pprint(a1)
+        datas = setup_call()
+
+        datas.initialize_fetch()
+        r0, r1 = datas.fetch_intraday()
+
+        # foo = MakeJSON()
+        # foo.switch = 'PUSH_DATA'
+        # foo.set_date_forma('iso')
+        # foo.setup = f'{tick}_tickData'
+        # foo.set_orientation('index')
+        #
+        # foo.export_here(r0)
+
+

@@ -12,7 +12,7 @@ class ExpoConfigs:
     DateFormat: [’ISO8601 (iso)’, ’epoch’, ’None’]
     FileName: ONLY pass the desired file name; .JSON file ext automatically added
     """
-    def __init__(self, filename='fuck', oriented='index', date_form='iso'):
+    def __init__(self, filename='defaultJSON', oriented='index', date_form='iso'):
         self.filename = filename
         self.oriented = oriented
         self.date_form = date_form
@@ -73,7 +73,7 @@ if __name__ == "__main__":
                         columns=['col 1', 'col 2'])
 
     print(f'\nStarting Test Push...')
-    boop = json_object(dati)
+    boop = json_object(dati, date_form='iso', oriented='index')
     print('\nBoop Instance:\n')
     pprint(boop)
     print(f'\nFinished Test Push...')
