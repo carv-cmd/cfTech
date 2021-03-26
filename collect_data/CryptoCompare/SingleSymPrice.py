@@ -51,7 +51,7 @@ class CryptoCompare(CurrentPrice):
             print(f'{key}: {self.data_points[key]}')
 
 
-def persist_until(period=5, timer=30):
+def persist_until(period=5.0, timer=30):
     """ It will hang when an exceptions raised, need to fix that.. """
     @set_interval(interval=period)
     def persistent_until():
@@ -84,5 +84,5 @@ headers = {"authorization": 'Apikey'+apikey}
 if __name__ == "__main__":
     configurations = config_payload(fsym='BTC', tsyms='USD,EUR')
     cc = CryptoCompare(**configurations)
-    persist_until(period=1, timer=60)
+    persist_until(period=.25, timer=60)
     cc.print_dict()
