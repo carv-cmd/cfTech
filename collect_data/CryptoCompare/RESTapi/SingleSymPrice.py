@@ -2,7 +2,7 @@ import os
 import requests
 import datetime
 from dotenv import load_dotenv, find_dotenv
-from call_threader import *
+from RESTapi.call_threader import *
 splitter = '------------------------------------------'
 
 load_dotenv(find_dotenv())
@@ -14,7 +14,7 @@ endpoint = "https://min-api.cryptocompare.com/data/price"
 class CurrentPrice:
     """ Descriptor class for call CryptoCompare single-symbol-price """
     def __init__(self, **kwargs):
-        self.payload = kwargs
+        self.payload = dict()
         self.fsym = kwargs['fsym']
         self.tsyms = kwargs['tsyms']
         self.dater_dict = {f"{datetime.date.today()}": f"{self.fsym}-{self.tsyms}-PRICE"}

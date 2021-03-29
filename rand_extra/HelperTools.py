@@ -3,7 +3,7 @@ import random
 import string
 
 
-def gen_password(name_len=16, pass_len=24):
+def gen_credentials(name_len=16, pass_len=24):
     """
     Use to generate randomized user name and passwords for API credentials
     DO NOT SAVE THESE VALUES ARBITRARILY WITHIN THE PROJECT. See 'check_env()' docstring for details
@@ -23,7 +23,7 @@ def gen_password(name_len=16, pass_len=24):
     return {"Username": username, "Password": password}
 
 
-def check_env(key='', print_it=''):
+def check_env(print_it=False, key=""):
     """
     Create a '.env' file in the project and add that extension .gitignore file
     Safer and easier way to manage API keys locally w/o risking a push to public repo
@@ -37,24 +37,41 @@ def check_env(key='', print_it=''):
     Add this to .env then pass key to func for testing, works with any envVar
         * TEST_KEY="E8gHLu6LjTDega"
 
-    Prints a single key pair value, and returns just the key
-    Prints all environment key/pair values
-    :returns: dict w/ env key/pairs as the dict key/pairs
+    if key=<someVal> :returns: Single value for key passed to keyword argument
+    :returns: Complete <envVars> dictionary object
+    :returns: None, just prints dictionary to console
     """
     print('\nChecking Current Environment Variables!\n')
 
     env_vars = os.environ
-    if key is not '':
-        print(f'{key}="{env_vars[key]}"')
-        return env_vars[key]
-
-    elif print_it is not 'yes':
-        return env_vars
-
-    else:
+    
+    if print_it:
         for var_key in env_vars.keys():
             print(f'\nEnvVar_Key: {var_key}'
                   f'\n\tEnvVar_Val: {env_vars[var_key]}')
+    
+    elif key and not print_it:
+        try:
+            print(f'{key}="{env_vars[key]}"')
+            return env_vars[key]
+        except KeyError:
+            print('Verify the name (<key>) for your environment variables and try again!')
+            return None
+        
+    else:
+        return env_vars
+    
+    # if key is not '':
+    #     print(f'{key}="{env_vars[key]}"')
+    #     return env_vars[key]
+    #
+    # elif print_it is not 'yes':
+    #     return env_vars
+    #
+    # else:
+    #     for var_key in env_vars.keys():
+    #         print(f'\nEnvVar_Key: {var_key}'
+    #               f'\n\tEnvVar_Val: {env_vars[var_key]}')
     return
 
 
@@ -62,6 +79,8 @@ if __name__ == "__main__":
     from dotenv import load_dotenv, find_dotenv
     load_dotenv(find_dotenv())
 
-    check_env(key='TEST_KEY')
-    print(f'\nGenerating Credentials!\n'
-          f'\nNew Credentials: {gen_password(12, 16)}\n')
+    check_env(key='TEST_Y')
+    # check_env(print_it=True)
+    
+    # print(f'\nGenerating Credentials!\n'
+    #       f'\nNew Credentials: {gen_credentials(12, 16)}\n')
