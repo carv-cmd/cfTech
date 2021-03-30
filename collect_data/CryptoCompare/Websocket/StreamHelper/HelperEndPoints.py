@@ -1,10 +1,5 @@
-# import datetime
-# import pandas as pd
 from ConfigureHelper import *
-# import pprint
 from pprint import pprint
-
-growlers = '\n-----------------------------------------------------------------------------------------------\n'
 
 
 class TopsREST(RESTapi):
@@ -155,10 +150,10 @@ def telesto(sets=True, genfo=False):
     def top_streams(**kwargs):
         """ :return: Dictionary of ALL-TOP helper endpoint JSON response objects """
         tops = TopsREST()
-        return {"TopTotalVolume": tops.top_vol_subs(**kwargs),
-                "TopPercentChange": tops.top_percent_change(**kwargs),
-                "TopMarketCap": tops.top_mrkt_cap_subs(**kwargs),
-                "TopDirectVolume": tops.top_direct_vol(**kwargs)}
+        return {"Top_TotalVolume": tops.top_vol_subs(**kwargs),
+                "Top_PercentChange": tops.top_percent_change(**kwargs),
+                "Top_MarketCap": tops.top_mrkt_cap_subs(**kwargs),
+                "Top_DirectVolume": tops.top_direct_vol(**kwargs)}
 
     def gen_info(**kwargs):
         """
@@ -169,9 +164,9 @@ def telesto(sets=True, genfo=False):
         :return: Dictionary of ALL-SUBS helper endpoints
         """
         subs = SubCallREST()
-        return {"SubPair": subs.subs_pair(**kwargs),
-                "SubWatchlist": subs.sub_watchlist(**kwargs),
-                "GenCoinInfo": subs.general_coin_info(**kwargs)}
+        return {"Sub_Pair": subs.subs_pair(**kwargs),
+                "Sub_Watchlist": subs.sub_watchlist(**kwargs),
+                "Gen_CoinInfo": subs.general_coin_info(**kwargs)}
         
     if sets and genfo:
         return top_streams, gen_info
@@ -182,34 +177,14 @@ def telesto(sets=True, genfo=False):
 
 
 def nested_printer(responses):
+    dik = dict()
     for request_type, response in responses.items():
-        for data in response['Data']:
-            # growlers == big ass line
-            print(growlers)
-            for info, daters in data.items():
-                print(f'\nRequest Type: {request_type}\nInfoType: {info}\n')
-                pprint(daters)
-                print(growlers)
-                
+        dik[request_type] = [data['CoinInfo']['Name'] for data in response['Data']]
+    return dik
 
+        
 if __name__ == "__main__":
     print(f'\nHelperEndPoints Initializing as {__name__}\n')
-    
-    # CALLS MULTIPLE REQUESTS AND PRINTS MULTIPLE RESPONSES. **see telesto docstring
-    coining = telesto()
-    coinWizard = coining(limit=10)
-    nested_printer(coinWizard)
 
-    # SINGLE HELPER ENDPOINT CALL STRUCTURE
-    # topPerChg = TopsREST()
-    # ab = topPerChg.top_vol_subs()
-    # bc = topPerChg.top_percent_change()
-    
-    # PASS DICTIONARY TO NESTED PRINTER TO PRINT JSON RESPONSE OBJECTS
-    # coiner = TopsREST()
-    # toppers = {'topPrices': coiner.top_by_price(limit=10),
-    #            'topVolumes': coiner.top_vol_subs(limit=10)}
-    # nested_printer(toppers)
-    
 else:
     print(f'\nHelperEndPoints Initializing as {__name__}\n')
