@@ -53,18 +53,18 @@ class TopLists:
 
 class HaveFunStayingPoor:
     """ TODO Docstring functionality """
-    def send_requests(self, metrics):
+    
+    @staticmethod
+    def send_requests(metrics):
         """
         Wrapper to initiate the full request.get(helpers) task
         TODO Add full docstring for class methods
         """
-        
         def response_object(**sendto):
             """
             TODO Docstring and mongo push
             TODO :MongoDB: dict(metric=report, data=requests.get(passing[0], params=passing[1]).json())
             """
-            
             response_dict = dict()
             for report, passing in sendto.items():
                 try:
@@ -102,27 +102,40 @@ class HaveFunStayingPoor:
         :return: dictionary object where; key='metric' & value='responseData_FullNames_list"
         TODO Generalize this docstring
         """
-        get_from = self.send_requests(check_these)
+        get_from = self.send_requests(my_list)
         return_values = get_from(**kwargs)
         return return_values
+
+
+def run_wrapper(func):
+    def execute(check_these):
+        func()
+        if not Verifier(check_these):
+            print("\nVerify List Entries. . .")
+        
+        else:
+            cc = HaveFunStayingPoor()
+            valuable_data = cc.send_agent(limit=10)  # returns full response
+            
+            coin_wizard = Printer(valuable_data)  # returns user sliced response
+            print(line)
+            pprint(coin_wizard)
+            
+    return execute
+    
+
+@run_wrapper
+def execute_call():
+    print('>>> EXECUTING REQUEST.GET(). . .')
 
 
 if __name__ == "__main__":
     print(f"\n>>> Initializing `ConfigureHelperV.2` as '{__name__}'...\n")
     
-    check_these = ["TopPercentChange", "TopMktCap"]
-    
-    if not Verifier(check_these):
-        print("\nVerify List Entries. . .")
-        
-    else:
-        cc = HaveFunStayingPoor()
-        valuable_data = cc.send_agent(limit=10)
-        coinWizard = quick_print(valuable_data)
-        print(line)
-        pprint(coinWizard)
+    my_list = ["TopPercentChange", "TopMktCap"]
+    execute_call(my_list)
     
 else:
     print(f"\n>>> Initializing `ConfigureHelperV.2` as '{__name__}'...\n")
-    check_these = []
+    check_list = []
     hfspClient = HaveFunStayingPoor
