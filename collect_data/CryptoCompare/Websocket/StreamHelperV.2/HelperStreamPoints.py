@@ -2,6 +2,8 @@
 from dotenv import load_dotenv, find_dotenv
 import os
 import requests
+import json
+from datetime import datetime
 import time
 from HelperTasks import *
 from pprint import pprint
@@ -68,16 +70,19 @@ class HaveFunStayingPoor:
             response_dict = dict()
             for report, passing in sendto.items():
                 try:
+                    report = report + datetime.now().isoformat()
                     daters = requests.get(passing[0], params=passing[1])
-                    print(f'>>> Received Request Response:({report}):\n\tFrom: "{daters.url}"')
                     response_dict[report] = daters.json()
+                    
+                    print(f'>>> Received Request Response:({report})]'
+                          f'\n\tFrom: "{daters.url}"')
+                    
                     del response_dict[report]['SponsoredData']
                     time.sleep(.25)
                     
                 except requests.exceptions.ConnectionError:
                     print('CONNECTION REFUSED INCREASE DURATION BETWEEN SUBSEQUENT REQUESTS')
                     break
-                    
             return response_dict
 
         def sender(**kwargs):
@@ -108,32 +113,33 @@ class HaveFunStayingPoor:
 
 
 def run_wrapper(func):
-    def execute(check_these):
+    def execute(verify_items, **kwargs):
         func()
-        if not Verifier(check_these):
+        if not Verified(verify_items):
             print("\nVerify List Entries. . .")
         
         else:
             cc = HaveFunStayingPoor()
-            valuable_data = cc.send_agent(limit=10)  # returns full response
-            
-            coin_wizard = Printer(valuable_data)  # returns user sliced response
-            print(line)
-            pprint(coin_wizard)
+            return cc.send_agent(**kwargs)  # returns full response
             
     return execute
     
 
 @run_wrapper
 def execute_call():
-    print('>>> EXECUTING REQUEST.GET(). . .')
+    print('>>> ATTEMPTING TO EXECUTE REQUEST.GET(). . .')
 
 
 if __name__ == "__main__":
     print(f"\n>>> Initializing `ConfigureHelperV.2` as '{__name__}'...\n")
+    # my_list = ["TopPerceange"]
+    # my_list = ["TopByPrice", "TopMktCap", "TopVolSubs", "TopDirectVol"]
     
-    my_list = ["TopPercentChange", "TopMktCap"]
-    execute_call(my_list)
+    my_list = ["TopPercentChange"]  # , "TopByPrice", "TopMktCap", "TopVolSubs", "TopDirectVol"]
+    executed = execute_call(my_list)
+    
+    print(f'\n>>> Request-Response Date:\n'
+          f'\n{json.dumps(executed, indent=4, sort_keys=True)}')
     
 else:
     print(f"\n>>> Initializing `ConfigureHelperV.2` as '{__name__}'...\n")
