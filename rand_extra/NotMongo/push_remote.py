@@ -62,23 +62,23 @@ class SetDir:
 #     def __str__(self):
 #         return f'Target Directory: {self.dump_to}'
 
-class Exporter(ExpoConfigs):
-
-    def __init__(self):
-        super().__init__()
-
-    def local_dir(self, data):
-        try:
-            data.to_json(self.filename, orient=self.oriented, date_format=self.date_form)
-
-        except FileNotFoundError or NotADirectoryError or ValueError:
-            print('Transaction FAILED!')
-
-    def remote_dir(self, data, target):
-        try:
-            target.change_dir()
-            data.to_json(self.filename, orient=self.oriented, date_format=self.date_form)
-            target.reset_dir()
-
-        except FileNotFoundError or NotADirectoryError or ValueError:
-            print('Transaction FAILED!')
+# class Exporter(ExpoConfigs):
+#
+#     def __init__(self):
+#         super().__init__()
+#
+#     def local_dir(self, data):
+#         try:
+#             data.to_json(self.filename, orient=self.oriented, date_format=self.date_form)
+#
+#         except FileNotFoundError or NotADirectoryError or ValueError:
+#             print('Transaction FAILED!')
+#
+#     def remote_dir(self, data, target):
+#         try:
+#             target.change_dir()
+#             data.to_json(self.filename, orient=self.oriented, date_format=self.date_form)
+#             target.reset_dir()
+#
+#         except FileNotFoundError or NotADirectoryError or ValueError:
+#             print('Transaction FAILED!')

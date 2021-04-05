@@ -23,7 +23,11 @@ class TopsREST(RESTapi):
         self.page = page
         self.tsym = fiat
         self.asset_class = asset_class
-        self.param_dict = dict(limit=self.limit, page=self.page, tsym=self.tsym, asset_class=self.asset_class)
+        self.param_dict = dict(limit=self.limit,
+                               page=self.page,
+                               tsym=self.tsym,
+                               asset_class=self.asset_class,
+                               api_key=apiKey)
     
     def top_vol_subs(self, **kwargs):
         """
@@ -34,7 +38,7 @@ class TopsREST(RESTapi):
         self.endpoint = self.root_endpoint + self.vol_subs_24h
         self.tops_param_dict(**kwargs)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
         
     def top_tier_vol(self, **kwargs):
         """
@@ -45,7 +49,7 @@ class TopsREST(RESTapi):
         self.endpoint = self.root_endpoint + self.top_tier_vol_subs_24hr
         self.tops_param_dict(**kwargs)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
         
     def top_mrkt_cap_subs(self, **kwargs):
         """
@@ -56,7 +60,7 @@ class TopsREST(RESTapi):
         self.endpoint = self.root_endpoint + self.market_cap_subs
         self.tops_param_dict(**kwargs)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
     
     def top_direct_vol(self, **kwargs):
         """
@@ -67,7 +71,7 @@ class TopsREST(RESTapi):
         self.endpoint = self.root_endpoint + self.direct_vol
         self.tops_param_dict(**kwargs)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
         
     def top_by_price(self, **kwargs):
         """
@@ -77,7 +81,7 @@ class TopsREST(RESTapi):
         self.endpoint = self.root_endpoint + self.by_price
         self.tops_param_dict(**kwargs)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
         
     def top_percent_change(self, **kwargs):
         """
@@ -87,8 +91,8 @@ class TopsREST(RESTapi):
         self.endpoint = self.root_endpoint + self.percent_change
         self.tops_param_dict(**kwargs)
         self.requester()
-        return self.get_json()
-    
+        return self.get_bson()
+        
     def __repr__(self):
         return f'{self.param_dict}'
 
@@ -111,7 +115,7 @@ class SubCallREST(RESTapi):
         self.tsym = tsym
         self.param_dict = dict(fsym=self.fsyms, tsyms=self.tsym)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
 
     def sub_watchlist(self, fsyms='BTC', tsym='USD'):
         """
@@ -125,7 +129,7 @@ class SubCallREST(RESTapi):
         self.tsym = tsym
         self.param_dict = dict(fsyms=self.fsyms, tsym=self.tsym)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
 
     def general_coin_info(self, fsyms='BTC,ETH', tsym='USD'):
         """
@@ -137,7 +141,7 @@ class SubCallREST(RESTapi):
         self.tsym = tsym
         self.param_dict = dict(fsyms=fsyms, tsym=tsym)
         self.requester()
-        return self.get_json()
+        return self.get_bson()
     
 
 def telesto(sets=True, genfo=False):
@@ -184,7 +188,7 @@ def nested_printer(responses):
 
         
 if __name__ == "__main__":
-    print(f'\nHelperEndPoints Initializing as {__name__}\n')
+    print(f"\n>>> 'HelperEndPoints' Initializing as '{__name__}'")
 
 else:
-    print(f'\nHelperEndPoints Initializing as {__name__}\n')
+    print(f">>> 'HelperEndPoints' Initializing as '{__name__}'")

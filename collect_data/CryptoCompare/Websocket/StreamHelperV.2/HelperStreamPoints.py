@@ -55,7 +55,7 @@ class TopLists:
 
 class HaveFunStayingPoor:
     """ TODO Docstring functionality """
-    
+
     @staticmethod
     def send_requests(metrics):
         """
@@ -73,13 +73,13 @@ class HaveFunStayingPoor:
                     report = report + datetime.now().isoformat()
                     daters = requests.get(passing[0], params=passing[1])
                     response_dict[report] = daters.json()
-                    
+
                     print(f'>>> Received Request Response:({report})]'
                           f'\n\tFrom: "{daters.url}"')
-                    
+
                     del response_dict[report]['SponsoredData']
                     time.sleep(.25)
-                    
+
                 except requests.exceptions.ConnectionError:
                     print('CONNECTION REFUSED INCREASE DURATION BETWEEN SUBSEQUENT REQUESTS')
                     break
@@ -117,31 +117,31 @@ def run_wrapper(func):
         func()
         if not Verified(verify_items):
             print("\nVerify List Entries. . .")
-        
+
         else:
             cc = HaveFunStayingPoor()
             return cc.send_agent(**kwargs)  # returns full response
-            
+
     return execute
-    
+
 
 @run_wrapper
 def execute_call():
-    print('>>> ATTEMPTING TO EXECUTE REQUEST.GET(). . .')
+    pass
 
 
 if __name__ == "__main__":
     print(f"\n>>> Initializing `ConfigureHelperV.2` as '{__name__}'...\n")
-    # my_list = ["TopPerceange"]
-    # my_list = ["TopByPrice", "TopMktCap", "TopVolSubs", "TopDirectVol"]
-    
+    # # my_list = ["TopPerceange"]
+    # # my_list = ["TopByPrice", "TopMktCap", "TopVolSubs", "TopDirectVol"]
+    #
     my_list = ["TopPercentChange"]  # , "TopByPrice", "TopMktCap", "TopVolSubs", "TopDirectVol"]
     executed = execute_call(my_list)
     
-    print(f'\n>>> Request-Response Date:\n'
-          f'\n{json.dumps(executed, indent=4, sort_keys=True)}')
+    # print(f'\n>>> Request-Response Date:\n'
+    #       f'\n{json.dumps(executed, indent=4, sort_keys=True)}')
     
 else:
     print(f"\n>>> Initializing `ConfigureHelperV.2` as '{__name__}'...\n")
-    check_list = []
-    hfspClient = HaveFunStayingPoor
+    # check_list = []
+    # hfspClient = HaveFunStayingPoor

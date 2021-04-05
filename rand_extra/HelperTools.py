@@ -37,50 +37,56 @@ def check_env(print_it=False, key=""):
     Add this to .env then pass key to func for testing, works with any envVar
         * TEST_KEY="E8gHLu6LjTDega"
 
-    if key=<someVal> :returns: Single value for key passed to keyword argument
-    :returns: Complete <envVars> dictionary object
-    :returns: None, just prints dictionary to console
+    if print_it=True     :returns: None, just prints envVars dictionary to console
+    if ^^ & key="EnvKey" :returns: Single value for key passed to keyword argument. **prints key-pair to verify
+    if only key="EnvKey" :returns: Single value for key passed to keyword argument
+    if plainFuncCall     :returns: Complete <envVars> dictionary object
     """
+    
     print('\nChecking Current Environment Variables!\n')
-
+    
     env_vars = os.environ
     
     if print_it:
         for var_key in env_vars.keys():
             print(f'\nEnvVar_Key: {var_key}'
                   f'\n\tEnvVar_Val: {env_vars[var_key]}')
-    
-    elif key and not print_it:
+        return
+            
+    elif print_it and key:
         try:
             print(f'{key}="{env_vars[key]}"')
+            return None
+        except KeyError:
+            print('Verify the name (<key>) for your environment variables and try again!')
+            return None
+
+    elif key and not print_it:
+        try:
             return env_vars[key]
         except KeyError:
             print('Verify the name (<key>) for your environment variables and try again!')
             return None
-        
+
     else:
         return env_vars
     
-    # if key is not '':
-    #     print(f'{key}="{env_vars[key]}"')
-    #     return env_vars[key]
-    #
-    # elif print_it is not 'yes':
-    #     return env_vars
-    #
-    # else:
-    #     for var_key in env_vars.keys():
-    #         print(f'\nEnvVar_Key: {var_key}'
-    #               f'\n\tEnvVar_Val: {env_vars[var_key]}')
-    return
-
 
 if __name__ == "__main__":
     from dotenv import load_dotenv, find_dotenv
     load_dotenv(find_dotenv())
-
-    check_env(key='TEST_Y')
+    
+    # SET THE NAME KWARG TO RETURN A SPECIFIC 'VALUE' FOR A GIVEN KEY-PAIR
+    # testkey = check_env(key='TEST_KEY')
+    # print(f'TesterKey="{testkey}')
+    
+    # PRINT ALL ENVIRONMENT VARIABLES
     # check_env(print_it=True)
     
+    # GET ENVIRONMENT VARIABLES DICTIONARY
+    # checked = check_env()
+    # print(f'EnvVars Dict:\n{checked}')
+    
+    # GENERATE A SET OF RANDOM CREDENTIALS
     # print(f'\nGenerating Credentials!\n'
     #       f'\nNew Credentials: {gen_credentials(12, 16)}\n')

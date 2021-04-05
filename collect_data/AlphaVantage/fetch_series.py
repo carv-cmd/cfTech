@@ -1,6 +1,6 @@
 from api_config import *
 from alpha_vantage.timeseries import TimeSeries
-from push_local import *
+from PandasToJSON import *
 
 
 class SeriesCall(KeyConfig):

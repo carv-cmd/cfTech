@@ -1,7 +1,9 @@
 # Decorators for ConfigureHelperV.2
 
+
 def verification_wrapper(func):
-    verified = ["TopPercentChange", "TopVolSubs", "TopMktCap", "TopByPrice", "TopDirectVol", "TopTierVolSubs"]
+    verified = ["TopPercentChange", "TopVolSubs", "TopMktCap",
+                "TopByPrice", "TopDirectVol", "TopTierVolSubs"]
     
     def verifier(unverified):
         func()
@@ -13,11 +15,6 @@ def verification_wrapper(func):
                 pass
         return True
     return verifier
-
-
-@verification_wrapper
-def user_entry():
-    print('\n>>> CHECKING USER INPUTS BEFORE CALLING API. . .')
 
 
 def print_wrapper(func):
@@ -33,10 +30,15 @@ def print_wrapper(func):
     return printer
 
 
+@verification_wrapper
+def user_entry():
+    print('\n>>> CHECKING USER INPUTS BEFORE CALLING API. . .')
+
+
 @print_wrapper
 def quick_print():
     print("\n>>> Generating a Quick Reference List <<<")
-    
+
 
 if __name__ == "__main__":
     needs_verification = ["TopPercentChange", "TopVolSubs", "TopMktCap", "TopByPrice"]
@@ -47,7 +49,7 @@ if __name__ == "__main__":
         print('\n>>> Modify metrics list to satisfy entry requirements. . .')
 
 else:
-    Verifier = user_entry
+    Verified = user_entry
     Printer = quick_print
 
 

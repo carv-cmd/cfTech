@@ -11,18 +11,17 @@
 
 ### Python-Mongo Interface / Drivers
   * [*PyMongo*](https://docs.mongodb.com/drivers/pymongo/)
-    & [*Motor (Async Driver)*](https://docs.mongodb.com/drivers/motor/)
+    && [*Motor (Async Driver)*](https://docs.mongodb.com/drivers/motor/)
   * [*BSON.py*](https://pymongo.readthedocs.io/en/stable/api/bson/index.html#module-bson)
-    & [*JSON.py*](https://docs.python.org/3/library/json.html)
+    && [*JSON.py*](https://docs.python.org/3/library/json.html)
 
 
 ### MongoDB Structure
 * [**Document Database**](https://docs.mongodb.com/master/introduction/#document-database)
-
-* [*Database*](https://docs.mongodb.com/master/core/databases-and-collections/#databases) >>
-  [*Collections*](https://docs.mongodb.com/master/core/databases-and-collections/#collections) >>
-  [*Documents*](https://docs.mongodb.com/master/core/document/#bson-document-format) >>
-  [*BSONTypes*](https://docs.mongodb.com/manual/reference/bson-types/index.html)
+  * [*Database*](https://docs.mongodb.com/master/core/databases-and-collections/#databases)
+    * [*Collections*](https://docs.mongodb.com/master/core/databases-and-collections/#collections)
+      * [*Documents*](https://docs.mongodb.com/master/core/document/#bson-document-format)
+        * [*BSONTypes*](https://docs.mongodb.com/manual/reference/bson-types/index.html)
 
 ***
 ### [*CRUD*](https://docs.mongodb.com/master/crud/#mongodb-crud-operations) Operations *create*, *read*, *update*, and *delete* documents.
@@ -113,9 +112,9 @@
 
 ***
 ### Command Line Utilities
+* [*mongod*](https://docs.mongodb.com/master/reference/program/mongod/#mongod)
 * [*The MongoDB Tools Documentation*](https://docs.mongodb.com/database-tools/)
 * [*Mongo Shell*](https://docs.mongodb.com/manual/reference/program/mongo/#mongo)
 * [*mongofiles.cli*](https://docs.mongodb.com/database-tools/mongofiles/#mongodb-binary-bin.mongofiles)
 * [*create.cli*](https://docs.mongodb.com/manual/reference/command/create/#dbcmd.create)
 * [*insert.cli*](https://docs.mongodb.com/manual/reference/command/insert/index.html)
-* [*mongod*](https://docs.mongodb.com/master/reference/program/mongod/#mongod)
