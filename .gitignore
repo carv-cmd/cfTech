@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Irrelevant as its probably not that accurate right now
+*.txt
