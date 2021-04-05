@@ -1,13 +1,15 @@
-from HelpClient import *
 import requests
-from datetime import datetime
 import time
+from HelpClient import InitialHelper
 
 
 class StartClient(object):
     def __init__(self):
         self.__helper = None
         self.daters = dict()
+    
+    def __setattr__(self, key, value):
+        super(StartClient, self).__setattr__(key, value)
 
     @property
     def helper(self):
@@ -16,9 +18,6 @@ class StartClient(object):
     @helper.setter
     def helper(self, value):
         self.__helper = value
-
-    def __setattr__(self, key, value):
-        super(StartClient, self).__setattr__(key, value)
         
 
 class CallerClient(StartClient):
@@ -38,13 +37,13 @@ class CallerClient(StartClient):
 
 
 if __name__ == "__main__":
+    from pprint import pprint
     print(f"\n>>> Initializing `RESTClient` as '{__name__}'...")
-    
-    helpers = ["Top_By_Price", "Top_Mkt_Cap", "Top_Vol_Subs", "Top_Direct_Vol"]
+    helpers = ['Top_Percent_Change']  # "Top_By_Price", "Top_Mkt_Cap", "Top_Vol_Subs", "Top_Direct_Vol"]
     cc = CallerClient()
     cc.set_helper(helpers, limit=10, fiat='USD')
-    
     pprint(cc.daters)
 
 else:
     print(f"\n>>> Initializing `RESTClient` as '{__name__}'...")
+    RESTRequest = CallerClient()
