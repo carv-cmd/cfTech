@@ -24,26 +24,26 @@ class CallerClient(StartClient):
     def __init__(self):
         super(CallerClient, self).__init__()
     
-    def call_rest(self):
+    def auto_rest(self):
         for ki, val in self.helper.items():
             print(f"\n\t>>> CALLING REST:FROM:[{ki}]")
             self.daters[ki] = requests.get(val['url'], params=val['parameters']).json()
             del self.daters[ki]['SponsoredData']
+            del self.daters[ki]['Data']['ConversionInfo']['RAW']
             time.sleep(.25)
 
-    def set_helper(self, enders, **kwargs):
+    def set_help(self, enders, **kwargs):
         self.helper = InitialHelper(enders, **kwargs)
-        self.call_rest()
+        self.auto_rest()
 
 
 if __name__ == "__main__":
     from pprint import pprint
-    print(f"\n>>> Initializing `RESTClient` as '{__name__}'...")
+    print(f">>> Initializing `RESTClient` as '{__name__}'...")
     helpers = ['Top_Percent_Change']  # "Top_By_Price", "Top_Mkt_Cap", "Top_Vol_Subs", "Top_Direct_Vol"]
     cc = CallerClient()
-    cc.set_helper(helpers, limit=10, fiat='USD')
+    cc.set_help(helpers, limit=10, fiat='USD')
     pprint(cc.daters)
 
 else:
-    print(f"\n>>> Initializing `RESTClient` as '{__name__}'...")
-    RESTRequest = CallerClient()
+    print(f">>> Initializing `RESTClient` as '{__name__}'...")
