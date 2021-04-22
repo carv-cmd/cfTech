@@ -112,6 +112,7 @@ def verifier(vary):
     def inner_verifier(unverified):
         vary()
         if unverified not in verified:
+            print(f"\n>>> Invalid entry: [{unverified}] was skipped. . .")
             return False
         else:
             pass
@@ -135,7 +136,7 @@ def rest_caller(resting):
         resting()
         for item in metrics:
             if not user_entry(item):
-                break
+                pass
             else:
                 maker.set_url(item)
                 maker.set_parameters(**kwargs)

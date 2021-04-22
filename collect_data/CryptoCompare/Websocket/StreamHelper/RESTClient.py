@@ -1,4 +1,5 @@
 import requests
+from datetime import datetime
 import time
 from HelpClient import InitialHelper
 
@@ -26,10 +27,10 @@ class CallerClient(StartClient):
     
     def auto_rest(self):
         for ki, val in self.helper.items():
+            ts = datetime.now().isoformat()
             print(f"\n\t>>> CALLING REST:FROM:[{ki}]")
-            self.daters[ki] = requests.get(val['url'], params=val['parameters']).json()
+            self.daters[ki + ts] = requests.get(val['url'], params=val['parameters']).json()
             del self.daters[ki]['SponsoredData']
-            del self.daters[ki]['Data']['ConversionInfo']['RAW']
             time.sleep(.25)
 
     def set_help(self, enders, **kwargs):
@@ -37,6 +38,7 @@ class CallerClient(StartClient):
         self.auto_rest()
 
 
+# instance.daters[ki]['Data']
 if __name__ == "__main__":
     from pprint import pprint
     print(f">>> Initializing `RESTClient` as '{__name__}'...")
@@ -47,3 +49,4 @@ if __name__ == "__main__":
 
 else:
     print(f">>> Initializing `RESTClient` as '{__name__}'...")
+    Rested = CallerClient()
