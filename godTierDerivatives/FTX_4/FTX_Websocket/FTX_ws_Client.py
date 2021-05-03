@@ -13,7 +13,7 @@ from dotenv import load_dotenv, find_dotenv
 
 from FTX_Websocket import WebsocketManager
 
-__all__ = ['FtxWebsocketClient']
+__all__ = ['FtxWebsocketClient', 'Optional', 'List']
 
 load_dotenv(find_dotenv())
 ftx_key = os.getenv('FTX_DATA_KEY')
@@ -34,15 +34,17 @@ class FtxWebsocketClient(WebsocketManager):
 
     def _reset_data(self) -> None:
         self._subscriptions: List[Dict] = []
-        self._orders: DefaultDict[int, Dict] = defaultdict(dict)
-        self._tickers: DefaultDict[str, Dict] = defaultdict(dict)
-        self._orderbook_timestamps: DefaultDict[str, float] = defaultdict(float)
-        self._orderbook_update_events.clear()
+        self._logged_in = False
         self._orderbooks: DefaultDict[str, Dict[str, DefaultDict[float, float]]] = \
             defaultdict(lambda: {side: defaultdict(float) for side in {'bids', 'asks'}})
-        self._orderbook_timestamps.clear()
-        self._logged_in = False
         self._last_received_orderbook_data_at: float = 0.0
+        self._orderbook_update_events.clear()
+        self._orderbook_timestamps: DefaultDict[str, float] = defaultdict(float)
+        self._orderbook_timestamps.clear()
+        self._tickers: DefaultDict[str, Dict] = defaultdict(dict)
+        self._tickers_timestamps: DefaultDict[str, float] = defaultdict(float)
+        self._tickers_timestamps.clear()
+        self._orders: DefaultDict[int, Dict] = defaultdict(dict)
 
     def _reset_orderbook(self, market: str) -> None:
         if market in self._orderbooks:
@@ -50,6 +52,17 @@ class FtxWebsocketClient(WebsocketManager):
         if market in self._orderbook_timestamps:
             del self._orderbook_timestamps[market]
 
+    def _reset_tickers(self, market: str) -> None:
+        if market in self._tickers:
+            del self._tickers[market]
+        if market in self._tickers_timestamps:
+            del self._tickers_timestamps[market]
+
+    def _reset_trades(self, market: str) -> None:
+        if market in self._trades:
+            del self._trades[market]
+
+    # Connect to FTX / Configurations
     def _get_url(self) -> str:
         """ Host endpoint url """
         return self._ENDPOINT
@@ -81,6 +94,7 @@ class FtxWebsocketClient(WebsocketManager):
     def _on_pong(self, ws, message):
         print(f'\n>>> PING WAS PONGED')
 
+    # Orderbook Handlers
     def wait_for_orderbook_update(self, market: str, timeout: Optional[float]) -> None:
         subscription = {'channel': 'orderbook', 'market': market}
         if subscription not in self._subscriptions:
@@ -122,19 +136,27 @@ class FtxWebsocketClient(WebsocketManager):
             self._orderbook_update_events[market].set()
             self._orderbook_update_events[market].clear()
 
+    # Ticker Handler
+    def _handle_ticker_message(self, message: Dict) -> None:
+        data = message['data']
+        self._tickers[message['market']] = data
+        self._tickers_timestamps[message['market']] = data['time']
+
+    # Trades Handler
     def _handle_trades_message(self, message: Dict) -> None:
         self._trades[message['market']].append(message['data'])
+        # self._trades[message['market']] = message['data']
 
-    def _handle_ticker_message(self, message: Dict) -> None:
-        self._tickers[message['market']] = message['data']
-
+    # Fills Handler
     def _handle_fills_message(self, message: Dict) -> None:
         self._fills.append(message['data'])
 
+    # Orders Handler
     def _handle_orders_message(self, message: Dict) -> None:
         data = message['data']
         self._orders.update({data['id']: data})
 
+    # Message Handler
     def _on_message(self, ws, raw_message: str) -> None:
         message = json.loads(raw_message)
         message_type = message['type']
@@ -158,34 +180,7 @@ class FtxWebsocketClient(WebsocketManager):
         elif channel == 'orders':
             self._handle_orders_message(message)
 
-    def get_fills(self) -> List[Dict]:
-        if not self._logged_in:
-            self._login()
-        subscription = {'channel': 'fills'}
-        if subscription not in self._subscriptions:
-            self._subscribe(subscription)
-        return list(self._fills.copy())
-
-    def get_orders(self) -> Dict[int, Dict]:
-        if not self._logged_in:
-            self._login()
-        subscription = {'channel': 'orders'}
-        if subscription not in self._subscriptions:
-            self._subscribe(subscription)
-        return dict(self._orders.copy())
-
-    def get_ticker(self, market: str) -> Dict:
-        subscription = {'channel': 'ticker', 'market': market}
-        if subscription not in self._subscriptions:
-            self._subscribe(subscription)
-        return self._tickers[market]
-
-    def get_trades(self, market: str) -> List[Dict]:
-        subscription = {'channel': 'trades', 'market': market}
-        if subscription not in self._subscriptions:
-            self._subscribe(subscription)
-        return list(self._trades[market].copy())
-
+    # Poll Orderbook
     def get_orderbook(self, market: str) -> Dict[str, List[Tuple[float, float]]]:
         subscription = {'channel': 'orderbook', 'market': market}
         if subscription not in self._subscriptions:
@@ -204,6 +199,42 @@ class FtxWebsocketClient(WebsocketManager):
     def get_orderbook_timestamp(self, market: str) -> str:
         return datetime.utcfromtimestamp(self._orderbook_timestamps[market]) \
             .strftime('%Y-%m-%d %H:%M:%S.%f')
+
+    # Poll Tickers
+    def get_ticker(self, market: str) -> Dict:
+        subscription = {'channel': 'ticker', 'market': market}
+        if subscription not in self._subscriptions:
+            self._subscribe(subscription)
+        return self._tickers[market]
+
+    def get_ticker_timestamp(self, market: str) -> str:
+        return datetime.utcfromtimestamp(self._orderbook_timestamps[market]) \
+            .strftime('%Y-%m-%d %H:%M:%S.%f')
+
+    # Poll Trades
+    def get_trades(self, market: str) -> List[Dict]:
+        subscription = {'channel': 'trades', 'market': market}
+        if subscription not in self._subscriptions:
+            self._subscribe(subscription)
+        return list(self._trades[market].copy())
+
+    # Poll Fills
+    def get_fills(self) -> List[Dict]:
+        if not self._logged_in:
+            self._login()
+        subscription = {'channel': 'fills'}
+        if subscription not in self._subscriptions:
+            self._subscribe(subscription)
+        return list(self._fills.copy())
+
+    # Poll Orders
+    def get_orders(self) -> Dict[int, Dict]:
+        if not self._logged_in:
+            self._login()
+        subscription = {'channel': 'orders'}
+        if subscription not in self._subscriptions:
+            self._subscribe(subscription)
+        return dict(self._orders.copy())
 
 
 if __name__ == '__main__':

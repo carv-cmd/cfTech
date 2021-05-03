@@ -6,7 +6,7 @@ from threading import Thread, Lock, BoundedSemaphore
 from websocket import enableTrace
 from websocket import WebSocketApp
 
-__all__ = ['WebsocketManager']
+__all__ = ['WebsocketManager', 'Lock']
 
 
 class WebsocketManager:
@@ -37,8 +37,13 @@ class WebsocketManager:
         self._reconnect(ws)
 
     def _on_error(self, ws, error):
-        """ TODO Should probably find out how to log the error """
-        self._reconnect(ws)
+        try:
+            with open('../temp_storage/socket_errors.txt', mode='a+') as error_log:
+                error_log.write(f'{repr(error)}')
+        except OSError as e:
+            raise e
+        finally:
+            self._reconnect(ws)
 
     def _connect(self):
         assert not self.ws, "ws should be closed before attempting to connect"
