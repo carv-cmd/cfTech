@@ -13,7 +13,13 @@ from dotenv import load_dotenv, find_dotenv
 
 from FTX_Websocket import WebsocketManager
 
-__all__ = ['FtxWebsocketClient', 'Optional', 'List']
+__all__ = [
+    'FtxWebsocketClient',
+    'Optional',
+    'Tuple',
+    'List',
+    'Dict',
+]
 
 load_dotenv(find_dotenv())
 ftx_key = os.getenv('FTX_DATA_KEY')
