@@ -25,7 +25,8 @@ __all__ = [
     'Tuple',
     'List',
     'Dict',
-    'Lock'
+    'Lock',
+    'time'
 ]
 
 load_dotenv(find_dotenv())
