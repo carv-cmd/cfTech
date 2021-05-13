@@ -43,17 +43,19 @@
 #     def _reset_data(self) -> None:
 #         self._subscriptions: List[Dict] = []
 #         self._logged_in = False
+#
 #         self._orderbooks: DefaultDict[str, Dict[str, DefaultDict[float, float]]] = \
 #             defaultdict(lambda: {side: defaultdict(float) for side in {'bids', 'asks'}})
-#         self._last_received_orderbook_data_at: float = 0.0
-#         self._orderbook_update_events.clear()
 #         self._orderbook_timestamps: DefaultDict[str, float] = defaultdict(float)
 #         self._orderbook_timestamps.clear()
+#         self._last_received_orderbook_data_at: float = 0.0
+#         self._orderbook_update_events.clear()
+#
 #         self._tickers: DefaultDict[str, Dict] = defaultdict(dict)
 #         self._tickers_timestamps: DefaultDict[str, float] = defaultdict(float)
 #         self._tickers_timestamps.clear()
 #         self._orders: DefaultDict[int, Dict] = defaultdict(dict)
-#
+# #
 #     def _reset_orderbook(self, market: str) -> None:
 #         if market in self._orderbooks:
 #             del self._orderbooks[market]

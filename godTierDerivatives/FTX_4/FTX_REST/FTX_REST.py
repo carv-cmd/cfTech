@@ -1,29 +1,36 @@
 # REST Endpoint URL: https://ftx.com/api
 # Local-Time vs FTX-Servers: https://otc.ftx.com/api/time
-
+# from datetime import datetime
+# from ciso8601 import
 import os
 import time
 import hmac
+from queue import Queue
 from typing import Optional, Dict, Any, List
 from requests import Request, Session, Response
 
-from datetime import datetime
-# from ciso8601 import
-
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
-ftx_key = os.getenv('FTX_DATA_KEY')
-ftx_sec = os.getenv('FTX_DATA_SEC')
+
+__all__ = ['FtxClientREST', 'time', 'Dict', 'Queue']
 
 
-class FtxClient:
+class FtxClientREST:
     """ Local-Time vs FTX-Servers: https://otc.ftx.com/api/time """
     _ENDPOINT = 'https://ftx.com/api/'
 
-    def __init__(self, api_key=None, api_secret=None, subaccount_name=None) -> None:
+    def __init__(self) -> None:
+        # , api_key: str = None, api_secret: str = None
         self._session = Session()
-        self._api_key = ftx_key
-        self._api_secret = ftx_sec
+        self._api_key = os.getenv('FTX_DATA_KEY')
+        self._api_secret = os.getenv('FTX_DATA_SEC')
+        self.response_data = Queue()
+
+    # def _set_keys(self, api_key, api_sec):
+    #     if api_key is not self._api_key:
+    #         self._api_key = os.getenv('FTX_DATA_KEY')
+    #     if api_sec is not self._api_secret:
+    #         self._api_secret = os.getenv('FTX_DATA_SEC')
 
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         return self._request('GET', path, params=params)
@@ -37,6 +44,7 @@ class FtxClient:
         pass
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
+        assert self._api_key and self._api_secret is not None, 'need keys foo'
         request = Request(method, self._ENDPOINT + path, **kwargs)
         self._authorize_request(request)
         response = self._session.send(request.prepare())
@@ -52,8 +60,7 @@ class FtxClient:
             'FTX-KEY': self._api_key, 'FTX-SIGN': signature, 'FTX-TS': str(timestamp)
             }
 
-    @staticmethod
-    def _process_response(response: Response) -> Any:
+    def _process_response(self, response: Response) -> Any:
         try:
             data = response.json()
         except ValueError:
@@ -62,7 +69,8 @@ class FtxClient:
         else:
             if not data['success']:
                 raise Exception(data['error'])
-            return data['result']
+            self.response_data.put(data['result'])
+            # return data['result']
 
     # ################ ACCT/ORDERS ################ #
     ##################################################
@@ -112,11 +120,7 @@ class FtxClient:
         """
         return self._get(f'markets/{market}/orderbook', {'depth': depth})
 
-    def get_trades(self,
-                   market: str,
-                   limit: int = None,
-                   start: int = None,
-                   end: int = None) -> List:
+    def get_trades(self, market: str, limit: int = None, start: int = None, end: int = None) -> List:
         """
         Market is the only required param, others are optional
         :param market: Name of the market; str('BTC-0628')
@@ -205,12 +209,12 @@ class FtxClient:
 
 
 if __name__ == '__main__':
-    from pprint import pprint
-    foo = FtxClient()
-
-    print('foo.')
-    print(foo.get_options_open_interest())
-
+    # from pprint import pprint
+    # foo = FtxClientREST()
+    #
+    # print('foo.')
+    # print(foo.get_options_open_interest())
+    print(dir(FtxClientREST))
 
 else:
     print(f'>>> Running FTX_REST.py as {__name__}')

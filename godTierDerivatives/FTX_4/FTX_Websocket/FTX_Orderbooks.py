@@ -1,24 +1,25 @@
 import os
 import hmac
-import json
 import time
 import zlib
 from datetime import datetime
-from collections import defaultdict
+from collections import defaultdict, deque
 from itertools import zip_longest
-from typing import DefaultDict, List, Dict, Tuple, Optional, Sequence
+from typing import DefaultDict, List, Dict, Tuple, Optional, Sequence, Deque, Any
 
 from gevent.event import Event
 from dotenv import load_dotenv, find_dotenv
-from FTX_Websocket import *
+
+from FTX_Websocket import WebsocketManager, Thread, Lock, logging, json, enableTrace
 
 
 __all__ = [
     'FtxWebsocketClient',
     'defaultdict',
+    'enableTrace',
+    'datetime',
     'Optional',
     'Sequence',
-    'Condition',
     'logging',
     'Thread',
     'Event',
@@ -26,7 +27,8 @@ __all__ = [
     'List',
     'Dict',
     'Lock',
-    'time'
+    'time',
+    'Any'
 ]
 
 load_dotenv(find_dotenv())
@@ -42,25 +44,24 @@ class FtxWebsocketClient(WebsocketManager):
         self._api_key = ftx_key
         self._api_secret = ftx_sec
         self._orderbook_update_events: DefaultDict[str, Event] = defaultdict(Event)
+        self._trades: DefaultDict[str, Deque] = defaultdict(lambda: deque([], maxlen=10000))
         self._reset_data()
 
     def _reset_data(self) -> None:
         """ TODO Log.Debug when this method is called"""
-        logging.debug('>>> _RESET_DATA.called(). . .')
         self._subscriptions: List[Dict] = []
         self._logged_in = False
-
         self._orderbooks: DefaultDict[str, Dict[str, DefaultDict[float, float]]] = \
             defaultdict(lambda: {side: defaultdict(float) for side in {'bids', 'asks'}})
-
         self._last_received_orderbook_data_at: float = 0.0
         self._orderbook_update_events.clear()
-
         self._orderbook_timestamps: DefaultDict[str, float] = defaultdict(float)
         self._orderbook_timestamps.clear()
+        self._tickers: DefaultDict[str, Dict] = defaultdict(dict)
+        self._tickers_timestamps: DefaultDict[str, float] = defaultdict(float)
+        self._tickers_timestamps.clear()
 
     def _reset_orderbook(self, market: str) -> None:
-        # logging.debug('>>> _RESET_ORDERBOOKS.called(). . .\n')
         if market in self._orderbooks:
             del self._orderbooks[market]
         if market in self._orderbook_timestamps:
@@ -130,6 +131,16 @@ class FtxWebsocketClient(WebsocketManager):
             self._orderbook_update_events[market].set()
             self._orderbook_update_events[market].clear()
 
+    # Ticker Handler
+    def _handle_ticker_message(self, message: Dict) -> None:
+        data = message['data']
+        self._tickers[message['market']] = data
+        self._tickers_timestamps[message['market']] = data['time']
+
+    # Trades Handler
+    def _handle_trades_message(self, message: Dict) -> None:
+        self._trades[message['market']].append(message['data'])
+
     def _on_message(self, ws, raw_message: str) -> None:
         message = json.loads(raw_message)
         message_type = message['type']
@@ -143,6 +154,10 @@ class FtxWebsocketClient(WebsocketManager):
         channel = message['channel']
         if channel == 'orderbook':
             self._handle_orderbook_message(message)
+        elif channel == 'trades':
+            self._handle_trades_message(message)
+        elif channel == 'ticker':
+            self._handle_ticker_message(message)
 
     def wait_for_orderbook_update(self, market: str, timeout: Optional[float]) -> None:
         subscription = {'channel': 'orderbook', 'market': market}
@@ -163,13 +178,29 @@ class FtxWebsocketClient(WebsocketManager):
                          ) for side in {'bids', 'asks'}
         }
 
-    def get_orderbook_timestamp(self, market: str) -> str:
+    def get_ordbk_ts(self, market: str) -> str:
         return datetime.utcfromtimestamp(self._orderbook_timestamps[market]) \
             .strftime('%Y-%m-%d %H:%M:%S.%f')
+
+    def get_tickers(self, market: str) -> Dict:
+        subscription = {'channel': 'ticker', 'market': market}
+        if subscription not in self._subscriptions:
+            self._subscribe(subscription)
+        return self._tickers[market]
+
+    def get_ticker_ts(self, market: str) -> str:
+        return datetime.utcfromtimestamp(self._tickers_timestamps[market]) \
+            .strftime('%Y-%m-%d %H:%M:%S.%f')
+
+    def get_trades(self, market: str) -> List[Dict]:
+        subscription = {'channel': 'trades', 'market': market}
+        if subscription not in self._subscriptions:
+            self._subscribe(subscription)
+        return list(self._trades[market].copy())
 
 
 if __name__ == '__main__':
     print(f'>>> Running FTX_ws_Client as {__name__}')
 
 else:
-    print(f'>>> Running FTX_ws_Client as {__name__}\n')
+    print(f'>>> Running FTX_ws_Client as {__name__}')

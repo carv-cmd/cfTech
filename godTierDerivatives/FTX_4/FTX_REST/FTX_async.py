@@ -3,9 +3,9 @@ import asyncio
 
 from pprint import pprint
 
-from FTX_REST import FtxClient
+from FTX_REST import FtxClientREST
 
-ftx_client = FtxClient()
+ftx_client = FtxClientREST()
 hold_calls = 0.25
 
 

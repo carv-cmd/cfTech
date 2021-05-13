@@ -1,14 +1,13 @@
-# import sys
+# import sys TODO find out wtf this was for?
 import json
 import time
 import logging
-from threading import Thread, Lock, Condition
+from threading import Thread, Lock
 
 from websocket import WebSocketApp
-# from websocket import enableTrace
-# enableTrace(True)
+from websocket import enableTrace
 
-__all__ = ['WebsocketManager', 'Thread', 'Lock', 'logging', 'Condition']
+__all__ = ['WebsocketManager', 'Thread', 'Lock', 'logging', 'json', 'enableTrace']
 
 logging.basicConfig(level=logging.DEBUG, format='(%(threadName)-9s) %(message)s')
 
@@ -18,7 +17,6 @@ class WebsocketManager:
 
     def __init__(self):
         self.connect_lock = Lock()
-        self.disconnect_lock = Condition()
         self.ws = None
 
     def _wrap_callback(self, func):
@@ -47,6 +45,7 @@ class WebsocketManager:
         self._reconnect(ws)
 
     def _on_error(self, ws, error):
+        """ Logs any _on_error call backs to socket_errors.txt """
         try:
             with open('../socket_errors.txt', mode='a+') as error_log:
                 error_log.write(f'{repr(error)}')
@@ -55,21 +54,8 @@ class WebsocketManager:
         finally:
             self._reconnect(ws)
 
-    def _reconnect(self, ws):
-        """ Automatically attempt to reconnect for long polling sessions """
-        assert ws is not None, '_reconnect should only be called with an existing ws'
-        if ws is self.ws:
-            self.ws = None
-            ws.close()
-            self.connect()
-
-    def reconnect(self) -> None:
-        """ See _reconnect """
-        if self.ws is not None:
-            self._reconnect(self.ws)
-
     def _run_websocket(self, ws):
-        """ Default = websocket.run_forever(ping_interval=15) """
+        """ Run persistent websocket with automatic ping_interval(default=15sec) """
         try:
             ws.run_forever(ping_interval=15)
         except Exception as e:
@@ -78,6 +64,7 @@ class WebsocketManager:
             self._reconnect(ws)
 
     def _connect(self):
+        """ Creates WebSocketApp object initia """
         assert not self.ws, "ws should be closed before attempting to connect"
         # Initialize websocket and assign callbacks to WebSocketApp(**kwargs)
         self.ws = WebSocketApp(
@@ -88,11 +75,10 @@ class WebsocketManager:
             on_pong=self._wrap_callback(self._on_pong),
         )
 
-        websocket_thread = Thread(name='FOREVER_SOCKET', target=self._run_websocket, args=(self.ws,))
+        websocket_thread = Thread(name='WebSocketApp', target=self._run_websocket, args=(self.ws,))
         websocket_thread.setDaemon(True)
         websocket_thread.start()
 
-        # Waits for socket to connect
         ts = time.time()
         while self.ws and (not self.ws.sock or not self.ws.sock.connected):
             if time.time() - ts > self._CONNECT_TIMEOUT_S:
@@ -100,12 +86,20 @@ class WebsocketManager:
                 return
             time.sleep(0.1)
 
-    def _disconnect(self, ws):
-        assert self.ws, "ws should be open before attempting to close"
-        if self.ws:
+    def _reconnect(self, ws):
+        """ See reconnect class method """
+        assert ws is not None, '_reconnect should only be called with an existing WebSocket'
+        if ws is self.ws:
             self.ws = None
             ws.close()
-            time.sleep(0.5)
+            self.connect()
+
+    def _disconnect(self, ws):
+        """ See disconnect class method """
+        assert ws is not None, "_disconnect should only be called with an existing WebSocket"
+        if ws is self.ws:
+            self.ws = None
+            ws.teardown()
 
     def _send(self, message):
         self.connect()
@@ -114,10 +108,8 @@ class WebsocketManager:
     def connect(self):
         """
         Establish a WebSocketApp connection with FTX streaming servers
-        Called implicitly by FtxWebsocketClient.inst.methods -> instance.get_foobar
-        Call explicitly to customize server polls. Pointless for the most part
+        Called implicitly by FtxWebsocketClient.methods -> instance.get_foobar
         """
-        # print('\n>>> Opening Websocket Connection w/ FTX servers. . .\n')
         if self.ws:
             return
         with self.connect_lock:
@@ -127,13 +119,27 @@ class WebsocketManager:
                     print('>>> Successfully Opened Websocket Connection. . .\n')
                     return
 
-    def disconnect(self):
-        if not self.ws:
-            return
-        self._disconnect(self.ws)
+    def reconnect(self) -> None:
+        """
+        Auto attempt reconnect when unexpected "_on_close" callback is signaled
+        If "_on_close" was triggered by user interrupt see -> "disconnect" method
+        """
+        if self.ws is not None:
+            self._reconnect(self.ws)
+
+    def disconnect(self) -> None:
+        """
+        Called on user interrupt (whatever the method)
+        Blocking reconnect attempt while data threads are gracefully joined
+        """
+        if self.ws is not None:
+            self._disconnect(self.ws)
 
     def send_json(self, message):
-        """ Encode message as JSON and send to FTX servers """
+        """
+        Encode message as JSON and send to FTX servers
+        TODO local client server connects through gui socket IPC interface
+        """
         self._send(json.dumps(message))
 
 
