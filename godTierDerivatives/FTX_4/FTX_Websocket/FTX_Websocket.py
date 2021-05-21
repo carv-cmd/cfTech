@@ -2,12 +2,12 @@
 import json
 import time
 import logging
-from threading import Thread, Lock
+from threading import Thread, Lock, Timer
 
 from websocket import WebSocketApp
 from websocket import enableTrace
 
-__all__ = ['WebsocketManager', 'Thread', 'Lock', 'logging', 'json', 'enableTrace']
+__all__ = ['WebsocketManager', 'Thread', 'Lock', 'logging', 'json', 'enableTrace', 'Timer']
 
 logging.basicConfig(level=logging.DEBUG, format='(%(threadName)-9s) %(message)s')
 

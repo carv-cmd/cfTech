@@ -58,7 +58,7 @@ class QuickData(ConfigREST):
                     self.response_data.put(self.request_method())
                 else:
                     self.response_data.put(self.request_method(rest[1]))
-                time.sleep(sync)
+                # time.sleep(sync)
                 self.response_data.task_done()
 
     def _write_responses(self):
@@ -69,13 +69,13 @@ class QuickData(ConfigREST):
         logging.debug('>>> _WRITE_RESPONSES.STARTED. . .')
         try:
             while True:
-                # logging.debug(f'>>> Qsize({self.response_data.qsize()})')
+                # logging.debug(f'>>> Qsize({self._response.qsize()})')
                 print(f"TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}"
                       f'DATA: {self.response_data.get(timeout=6)}')
                 # market = 'bigQuery'
-                # data = self.response_data.get(timeout=6)
+                # data = self._response.get(timeout=6)
                 # print(data)
-                # metrics, data = self.response_data.get(timeout=6)
+                # metrics, data = self._response.get(timeout=6)
                 # if metrics[1] is not None:
                 #     market = ''.join(['_' if x in ['/', '-'] else x for x in metrics[1]]).upper()
                 # with open(file=f"../temp_storage/REST_{metrics[0].upper()}_{market}.txt",
@@ -152,9 +152,10 @@ def foobar():
 def smol_foobar():
     ftx = QuickData()
     ftx.send_request({
-        # 'get_single_market': ('BTC/USD', 'ETH/USD', 'BTC-PERP', 'ETH-PERP'),
-        'list_markets': None
+        'get_single_market': ('BTC/USD', 'ETH/USD', 'BTC-PERP', 'ETH-PERP'),
+        # 'list_markets': None
     })
+
 
 if __name__ == '__main__':
     smol_foobar()

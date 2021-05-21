@@ -47,6 +47,10 @@ class FtxWebsocketClient(WebsocketManager):
         self._trades: DefaultDict[str, Deque] = defaultdict(lambda: deque([], maxlen=10000))
         self._reset_data()
 
+    def __getattr__(self, item):
+        logging.debug('>>> Called FtxWebsocketClient.__getattr__. . .')
+        return self.__dict__[item]
+
     def _reset_data(self) -> None:
         """ TODO Log.Debug when this method is called"""
         self._subscriptions: List[Dict] = []

@@ -1,11 +1,40 @@
-# from ftx_only_orderbook import FtxWebsocketClient, logging, Thread, Event
 # from gevent import socket
 # import greenlet
 # from threading import activeCount as activeCountThreads
+# def _ordbk_task(self, market: str, delay):
+#     """ Upon update, object FIFO-Queued for safe writes. """
+#     logging.debug(f'<<< _ORDER_BOOK_TASK({market}, delay=wait()).started(protected) >>>')
+#     while self._run_event.is_set():
+#         (mkt_ordbk, ordbk_ts) = self.get_orderbook(market=market), self.get_ordbk_ts(market=market)
+#         self._write_pool.put([market, mkt_ordbk, ordbk_ts, 'ORDERBOOK'])
+#         print(f'-> Orderbook({market}).recv[ <{ordbk_ts}> ]')
+#         # time.sleep(2.0)
+#         self.wait_for_orderbook_update(market=market, timeout=5.0)
+#
+#
+# def _tick_task(self, market: str, delay: float = 4):
+#     logging.debug(f'>>> _TICKERS_TASK(market={market}, delay={delay})')
+#     while self._run_event.is_set():
+#         (mkt_ticks, tick_ts) = self.get_tickers(market=market), self.get_ticker_ts(market=market)
+#         if len(mkt_ticks) > 0:
+#             self._write_pool.put([market, mkt_ticks, tick_ts, 'TICKERS'])
+#             logging.debug(f'>>> Tickers({market}).recv[<{tick_ts}>]')
+#             time.sleep(2)
+#
+#
+# def _trade_task(self, market: str, delay: float = 2):
+#     logging.debug(f'>>> _TRADES_TASK(market={market}, delay={delay})')
+#     while self._run_event.is_set():
+#         (mkt_trades, local_ts) = self.get_trades(market=market), self.get_local_ts()
+#         if len(mkt_trades) > 0:
+#             self._write_pool.put([market, mkt_trades, local_ts, 'TRADES'])
+#             logging.debug(f'>>> Tickers({market}).recv[<{local_ts}>]')
+#             time.sleep(2)
+import json
 from threading import enumerate as enumerate_threads
 from queue import Queue
 from _queue import Empty
-from FTX_Orderbooks import *
+from FTX_Ws_Broker import *
 
 
 class ClientSocket(FtxWebsocketClient):
@@ -21,10 +50,63 @@ class ClientSocket(FtxWebsocketClient):
         self._write_pool = Queue()
         self._run_event = Event()
         self._thread_pooler = None
+        self._set_tasks()
 
     @staticmethod
     def get_local_ts():
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+
+    def _run_task(self, market: str, channel_handle: str, ftx_task, ftx_ts):
+        if channel_handle is 'orderbooks':
+            while self._run_event.is_set():
+                (channel, timestamp) = ftx_task(market=market), ftx_ts(market=market)
+                self._write_pool.put([market, channel, timestamp, channel_handle.upper()])
+                self.wait_for_orderbook_update(market=market, timeout=5.0)
+        else:
+            while self._run_event.is_set():
+                (channel, timestamp) = ftx_task(market=market), ftx_ts(market=market)
+                self._write_pool.put([market, channel, timestamp, channel_handle.upper()])
+                time.sleep(2.0)
+
+    def _stream_pooler(self, market: str = None, interval: str = None, channel=(True, False, False)):
+        """ Creates thread tasked with polling XYZ market, FIFO.put for processing """
+        pools = {
+            'Orderbooks': (self.get_orderbook, self.get_ordbk_ts),
+            'Trades': (self.get_trades, self.get_local_ts),
+            'Tickers': (self.get_tickers, self.get_ticker_ts)
+        }
+        for channel, streams in pools.items():
+            mkt_threader = Thread(
+                name=f'{market}{channel}', target=self._run_task,
+                args=(market, channel, streams[0], streams[1]))
+            mkt_threader.start()
+
+    def _subscription_arbiter(self) -> None:
+        """ Gets new subscriptions from _subs_pool queue and starts _sub_market_thread """
+        while self._run_event.is_set():
+            market_name, market_thread = self._subs_pool.get()
+            market_thread.start()
+            time.sleep(0.5)
+            self._subs_pool.task_done()
+        self._subs_pool.join()
+
+    def _stream_wizard(self, streamers):
+        if not self._run_event.is_set():
+            self._run_event.set()
+        if self._thread_pooler is None:
+            self._thread_pooler = Thread(name='_ARBITER', target=self._subscription_arbiter, daemon=True)
+            self._thread_pooler.start()
+        market_pool = Thread(name='_MARKET_POOL', target=self._stream_pooler, args=(streamers,))
+        safe_writes = Thread(name='_WRITE_WIZARD', target=self._write_worker)
+        return market_pool, safe_writes
+
+    def _write_worker(self):
+        raise NotImplementedError()
+
+
+class WriteUpdates(ClientSocket):
+    def __init__(self):
+        super().__init__()
 
     def _write_worker(self) -> Any:
         """
@@ -36,7 +118,7 @@ class ClientSocket(FtxWebsocketClient):
                 (market, update, update_ts, channel) = self._write_pool.get(timeout=5)
                 valid_name = ''.join(['_' if x in '/' else x for x in market]).upper()
                 with open(file=f'../temp_storage/{valid_name}_{channel}.txt', mode='a+') as filer:
-                    filer.writelines(f'UPDATED_TS: {update_ts}\nDATA_SAMPLE: {update}\n')
+                    filer.writelines(f"{json.dumps({f'UPDATED[{update_ts}]': update})}\n")
                     self._write_pool.task_done()
         except Empty:
             logging.debug(f'* SafeWriteQueue.isEmpty(joinQueue=True) *')
@@ -45,62 +127,8 @@ class ClientSocket(FtxWebsocketClient):
         finally:
             self._write_pool.join()
 
-    def _ordbk_task(self, market: str, delay: float = 1.0) -> None:
-        """ Upon update, object FIFO-Queued for safe writes. """
-        logging.debug(f'<<< _ORDER_BOOK_TASK({market}, delay=wait()).started(protected) >>>')
-        while self._run_event.is_set():
-            (mkt_ordbk, ordbk_ts) = self.get_orderbook(market=market), self.get_ordbk_ts(market=market)
-            self._write_pool.put([market, mkt_ordbk, ordbk_ts, 'ORDERBOOK'])
-            logging.debug(f'-> Orderbook({market}).recv[ <{ordbk_ts}> ]')
-            time.sleep(delay)
-            self.wait_for_orderbook_update(market=market, timeout=5.0)
-
-    def _tick_task(self, market: str, delay: float = 4) -> None:
-        logging.debug(f'>>> _TICKERS_TASK(market={market}, delay={delay})')
-        while self._run_event.is_set():
-            (mkt_ticks, tick_ts) = self.get_tickers(market=market), self.get_ticker_ts(market=market)
-            if len(mkt_ticks) > 0:
-                self._write_pool.put([market, mkt_ticks, tick_ts, 'TICKERS'])
-                logging.debug(f'>>> Tickers({market}).recv[<{tick_ts}>]')
-                time.sleep(delay)
-
-    def _trade_task(self, market: str, delay: float = 2) -> None:
-        logging.debug(f'>>> _TRADES_TASK(market={market}, delay={delay})')
-        while self._run_event.is_set():
-            (mkt_trades, local_ts) = self.get_trades(market=market), self.get_local_ts()
-            if len(mkt_trades) > 0:
-                self._write_pool.put([market, mkt_trades, local_ts, 'TRADES'])
-                logging.debug(f'>>> Tickers({market}).recv[<{local_ts}>]')
-                time.sleep(delay)
-
-    def _stream_pooler(self, streamers):
-        """ Creates thread tasked with polling XYZ market, FIFO.put for processing """
-        pools = {'orderbook': self._ordbk_task, 'tickers': self._tick_task, 'trades': self._trade_task}
-        for channel, subs in streamers.items():
-            for market in subs[1]:
-                logging.debug(f'>>> _QUEUED_STARTS: [ {channel}_{market}, delay={subs[0]} ]')
-                mkt_threader = Thread(
-                    name=f'{channel.upper()}_{market}', target=pools[channel], args=(market, subs[0]))
-                self._subs_pool.put([market, mkt_threader])
-
-    def _subscription_arbiter(self) -> None:
-        """ Gets new subscriptions from _subs_pool queue and starts _sub_market_thread """
-        while self._run_event.is_set():
-            market_name, market_thread = self._subs_pool.get()
-            market_thread.start()
-            time.sleep(0.25)
-            self._subs_pool.task_done()
-        self._subs_pool.join()
-
-    def stream_wizard(self, streamers: Dict[str, Tuple[Optional[float], Tuple[str, ...]]]) -> None:
-        """ TODO docstring this mf """
-        if not self._run_event.is_set():
-            self._run_event.set()
-        if self._thread_pooler is None:
-            self._thread_pooler = Thread(name='_ARBITER', target=self._subscription_arbiter, daemon=True)
-            self._thread_pooler.start()
-        market_pool = Thread(name='_MARKET_POOL', target=self._stream_pooler, args=(streamers,))
-        safe_writes = Thread(name='_WRITE_WIZARD', target=self._write_worker)
+    def stream_wizard(self, streamers: Dict[str, Any]) -> None:
+        market_pool, safe_writes = self._stream_wizard(streamers=streamers)
         market_pool.start()
         time.sleep(0.5)
         safe_writes.start()
@@ -115,7 +143,6 @@ class ClientSocket(FtxWebsocketClient):
             safe_writes.join()
             self.disconnect()
         finally:
-            print(f'\n>>> Enumerate Threads: ')
             for ti in enumerate_threads():
                 print(f'>>> LiveThread: [{ti}]')
             return
@@ -123,13 +150,13 @@ class ClientSocket(FtxWebsocketClient):
 
 if __name__ == '__main__':
     print(f'>>> Running FTX_OrderbooksClient as {__name__}\n')
-    socks = ClientSocket()
-    # lol = ('BTC/USD', )
+    socks = WriteUpdates()
     # lol = ('BTC/USD', 'BTC/USDT', 'BTC-PERP', 'BTC/TRYB', 'ETH/USD', 'ETH/USDT', 'ETH/BTC', 'ETH-PERP')
-    # socks.stream_wizard({'orderbook': (2, lol), 'trades': (12, lol), 'tickers': (10, lol)})
-    lol = ('BTC/USD',)
-    socks.stream_wizard({'trades': (3, lol)})
+    # 'trades': (12, lol), 'tickers': (10, lol)})
+    # socks.stream_wizard({'trades': lol})
 
+    lol = ('BTC-PERP',)
+    socks.stream_wizard({'orderbook': lol})
 
 else:
     print(f'>>> Running FTX_OrderbooksClient as {__name__}\n')

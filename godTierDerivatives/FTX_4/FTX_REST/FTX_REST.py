@@ -20,45 +20,10 @@ class FtxClientREST:
     _ENDPOINT = 'https://ftx.com/api/'
 
     def __init__(self) -> None:
-        # , api_key: str = None, api_secret: str = None
         self._session = Session()
         self._api_key = os.getenv('FTX_DATA_KEY')
         self._api_secret = os.getenv('FTX_DATA_SEC')
         self.response_data = Queue()
-
-    # def _set_keys(self, api_key, api_sec):
-    #     if api_key is not self._api_key:
-    #         self._api_key = os.getenv('FTX_DATA_KEY')
-    #     if api_sec is not self._api_secret:
-    #         self._api_secret = os.getenv('FTX_DATA_SEC')
-
-    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        return self._request('GET', path, params=params)
-
-    def _post(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        """ TODO complete _post method """
-        pass
-
-    def _delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        """ TODO complete delete method """
-        pass
-
-    def _request(self, method: str, path: str, **kwargs) -> Any:
-        assert self._api_key and self._api_secret is not None, 'need keys foo'
-        request = Request(method, self._ENDPOINT + path, **kwargs)
-        self._authorize_request(request)
-        response = self._session.send(request.prepare())
-        response.close()
-        return self._process_response(response)
-
-    def _authorize_request(self, request: Request) -> None:
-        timestamp = int(time.time() * 1000)
-        foobar = request.prepare()
-        sig_load = f"{timestamp}{foobar.method}{foobar.path_url}".encode()
-        signature = hmac.new(self._api_secret.encode(), sig_load, 'sha256').hexdigest()
-        request.headers = {
-            'FTX-KEY': self._api_key, 'FTX-SIGN': signature, 'FTX-TS': str(timestamp)
-            }
 
     def _process_response(self, response: Response) -> Any:
         try:
@@ -71,6 +36,34 @@ class FtxClientREST:
                 raise Exception(data['error'])
             self.response_data.put(data['result'])
             # return data['result']
+
+    def _authorize_request(self, request: Request) -> None:
+        timestamp = int(time.time() * 1000)
+        foobar = request.prepare()
+        sig_load = f"{timestamp}{foobar.method}{foobar.path_url}".encode()
+        signature = hmac.new(self._api_secret.encode(), sig_load, 'sha256').hexdigest()
+        request.headers = {
+            'FTX-KEY': self._api_key, 'FTX-SIGN': signature, 'FTX-TS': str(timestamp)
+            }
+
+    def _request(self, method: str, path: str, **kwargs) -> Any:
+        assert self._api_key and self._api_secret is not None, 'need keys foo'
+        request = Request(method, self._ENDPOINT + path, **kwargs)
+        self._authorize_request(request)
+        response = self._session.send(request.prepare())
+        response.close()
+        return self._process_response(response)
+
+    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        return self._request('GET', path, params=params)
+
+    def _post(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """ TODO complete _post method """
+        pass
+
+    def _delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """ TODO complete delete method """
+        pass
 
     # ################ ACCT/ORDERS ################ #
     ##################################################

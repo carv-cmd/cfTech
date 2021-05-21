@@ -1,9 +1,10 @@
 import os
 import random
 import string
+from collections import defaultdict
 
 
-def gen_credentials(name_len=16, pass_len=24):
+def gen_credentials(name_len: int, pass_len: int):
     """
     Use to generate randomized user name and passwords for API credentials
     DO NOT SAVE THESE VALUES ARBITRARILY WITHIN THE PROJECT. See 'check_env()' docstring for details
@@ -75,6 +76,7 @@ def check_env(print_it=False, key=""):
 if __name__ == "__main__":
     from dotenv import load_dotenv, find_dotenv
     load_dotenv(find_dotenv())
+    print(gen_credentials(name_len=16, pass_len=12))
     
     # SET THE NAME KWARG TO RETURN A SPECIFIC 'VALUE' FOR A GIVEN KEY-PAIR
     # testkey = check_env(key='TEST_KEY')
@@ -90,3 +92,5 @@ if __name__ == "__main__":
     # GENERATE A SET OF RANDOM CREDENTIALS
     # print(f'\nGenerating Credentials!\n'
     #       f'\nNew Credentials: {gen_credentials(12, 16)}\n')
+
+# bc1q6f4c97zup9zjvqfz6xh2nmnwjtk4s2zn2r028m
