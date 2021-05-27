@@ -130,3 +130,4 @@ dmypy.json
 
 # Irrelevant as its probably not that accurate right now
 *.txt
+*.json
