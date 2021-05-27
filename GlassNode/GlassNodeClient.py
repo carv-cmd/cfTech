@@ -1,5 +1,3 @@
-# import numpy
-# import time
 from matplotlib import style
 import matplotlib.pyplot as plt
 # import matplotlib.dates as mdates
@@ -9,14 +7,15 @@ from GlassNodeBroker import *
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 
 
-class MatPlotLibs(GlassHandler):
+class MatPlotLibs(Glassnodes):
     _growler = ''.join(['-' for i in range(50)])
 
     style.use('dark_background')
 
-    def __init__(self):
+    def __init__(self, big_queries: List[Any] = None):
         super().__init__()
-        self.big_plot = plt.subplots(nrows=1, ncols=1, figsize=(6, 9))
+        self._queries = big_queries
+        # self.big_plot = plt.subplots(nrows=1, ncols=1, figsize=(6, 9))
 
     @staticmethod
     def _make_subplots(**kwargs):
@@ -43,12 +42,14 @@ class MatPlotLibs(GlassHandler):
         # plt.show()
         pass
 
-    def run_glassnodes(self, query_metrics):
+    def run_glassnodes(self, query_metrics=None):
+        if self._queries is not None:
+            query_metrics = self._queries
         self._loader_plt(self.magic_metrics(query_metrics))
 
 
-def big_query():
-    return {
+def big_query(queries, mats=False):
+    _known = {
         '0': ('market', 'price_usd_close', {'a': "BTC"}),
         '1': ('market', 'price_usd_ohlc', {'a': "BTC"}),
         '2': ('market', 'marketcap_realized_usd', {'a': 'BTC'}),
@@ -68,16 +69,16 @@ def big_query():
         '16': ('transactions', 'transfers_from_exchanges_count', {'a': 'BTC'}),
         '17': ('transactions', 'transfers_to_exchanges_count', {'a': 'BTC'})
     }
-
-
-def test_query(queries):
-    _known = big_query()
-    fucking_ape = GlassHandler()
-    fucking_ape.magic_metrics([_known[index] for index in queries])
+    _getters = [_known[index] for index in queries]
+    if mats:
+        pass
+    else:
+        heavy_wizard = Glassnodes()
+        heavy_wizard.magic_metrics(_getters)
 
 
 if __name__ == '__main__':
-    test_query(['0', '1', '2', '3'])
+    big_query(['0', '1', '2', '3', '6', '11', '12'])
 
     # NODES = MatPlotLibs()
     # NODES.magic_metrics(_known)

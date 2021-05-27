@@ -16,9 +16,9 @@ import json
 from datetime import datetime
 from queue import Queue
 from _queue import Empty
-from threading import Thread, Event, Condition, RLock
+from threading import Thread, Event, RLock
 from collections import defaultdict
-from typing import Any, Optional, Dict, Tuple, List, Sequence
+from typing import Any, Optional, Dict, Tuple, List  # , Sequence
 
 import pandas
 import ciso8601
@@ -33,7 +33,7 @@ logging.basicConfig(level=logging.DEBUG, format='(%(threadName)-9s) %(message)s'
 __all__ = [
     'GlassBroker',
     'GlassClient',
-    'GlassHandler',
+    'Glassnodes',
     'defaultdict',
     'datetime',
     'logging',
@@ -43,6 +43,7 @@ __all__ = [
     'Optional',
     'Tuple',
     'Dict',
+    'List',
     'Any'
 ]
 
@@ -98,7 +99,7 @@ class GlassBroker:
 
         :return: tuple('index_endpoint_asset', Response)
         """
-        assert endpoint in self._validity[index], f'Need valid endpoint you fucking donkey\n{endpoint}'
+        assert endpoint in self._validity[index], f'{index}/{endpoint} -> Invalid u fucking donkey'
         _path = f'{self._GLASSNODE}/{index}/{endpoint}'
         return self._request('GET', target=_path, params=kwargs)
 
@@ -145,13 +146,13 @@ class GlassClient(GlassBroker):
                  a=None, s=None, u=None, i='24h', f='JSON',
                  c=None, e=None, timestamp_format='unix'):
         super(GlassClient, self).__init__()
-        self.a = a
-        self.s = s
-        self.u = u
-        self.i = i
-        self.f = f
-        self.c = c
-        self.e = e
+        self.a = a  # asset_symbol
+        self.s = s  # start_point
+        self.u = u  # until_point
+        self.i = i  # resolution_interval
+        self.f = f  # response_format
+        self.c = c  # currency
+        self.e = e  # exchange_name
         self.timestamp_format = timestamp_format
         self.index = index
         self.endpoint = endpoint
@@ -160,7 +161,7 @@ class GlassClient(GlassBroker):
              for k, ve in locals().copy().items() if (k in self._PARAMS and ve is not None)}
 
     def _set_attributes(self, **kwargs):
-        """ Class attributes setter_handler. _PRIVATE """
+        """ Set class attributes. _PRIVATE """
         for pos_key, pos_val in kwargs.items():
             if pos_key in 'kwargs':
                 foo_copy = getattr(self, 'params').copy()
@@ -191,49 +192,52 @@ class GlassClient(GlassBroker):
         qc = locals().copy()
         if index and endpoint is not None:
             self._set_attributes(index=qc['index'], endpoint=qc['endpoint'])
+        elif endpoint is not None:
+            self._set_attributes(endpoint=qc['endpoint'])
         if len(qc['kwargs']) != 0:
             self._set_attributes(kwargs=qc['kwargs'])
         assert self.index and self.endpoint and self.params['a'] is not None, \
-            "U fucking donkey! REQUIRED ATTRIBUTES are required at some point!!!"
+            "REQUIRED ATTRIBUTES are REQUIRED at some point. . ."
         return self.get_metrics(
             getattr(self, 'index'), getattr(self, 'endpoint'), **getattr(self, 'params'))
 
 
-class GlassHandler(GlassClient):
-    # Pandas DataFrame Configuration
+class Glassnodes(GlassClient):
+    # Pandas.DataFrame Configuration
     pandas.set_option('display.width', 120)
 
     def __init__(self):
-        super(GlassHandler, self).__init__()
-        self._arbiter = Thread(name='_ARBITER_', target=self._queue_arbiter)
-        self._request_events = Event()
-        self._response_events = Event()
-        self._ready_plotter = Event()
+        super(Glassnodes, self).__init__()
+        self._request_lock = RLock()
         self._responses = Queue()
+        self._results_ready = Event()
         self._processed = []
 
-    @staticmethod
-    def print_processed(ready) -> None:
-        """ DataFrame pretty printer """
-        _fat_line = ''.join(['-' for i in range(50)])
-        try:
-            print("\n{}\nDataFrame: -> {}\n\n{}\n\n{}\n{}".format(
-                _fat_line, ready.name, ready, ready.describe(), _fat_line))
-        except AttributeError:
-            for dp in ready:
-                print("\n{}\nDataFrame: -> {}\n\n{}\n\n{}\n{}".format(
-                    _fat_line, dp.name, dp, dp.describe(), _fat_line))
+    def _q_request(self, index: str, endpoint: str, **kwargs) -> None:
+        """ Sends HTTP request to glassnode and puts raw response obj in FIFO queue """
+        with self._request_lock:
+            metric, data = self.glass_quest(index=index, endpoint=endpoint, **kwargs)
+        self.reader_writer(metric, data)
+        thread_json = Thread(name='JSN', target=self.json_to_df, args=(metric, data.json()), daemon=True)
+        thread_json.start()
 
-    @staticmethod
-    def _reader_writer(meter, dater=None) -> Any:
-        """  If a metric has been previously saved load save, else request metric """
-        _metric = '_'.join(meter.split('/')).upper()
-        if dater:
-            with open(file=f"GET_REKT/{_metric}.json", mode='w') as filer:
-                filer.write(dater.text)
-        else:
-            with open(file=f"GET_REKT/{_metric}.json", mode='r') as filer:
-                return json.loads(filer.readline())
+    def magic_metrics(self, queries: List[Tuple[str, str, Dict[str, Any]]], update=False):  # -> List:
+        """ U.I. Layer, pass Tuple['idx', 'endpoint', Dict:[str(param), Any]] """
+        for idx, ends, kwargs in queries:
+            _target = f"{idx}_{ends}_{kwargs['a']}"
+            try:
+                if update:
+                    raise OSError
+                _saved = self.reader_writer(_target)
+                json_frame = Thread(
+                    name='LOAD_'+_target, target=self.json_to_df, args=(_target, _saved), daemon=True)
+                json_frame.start()
+            except OSError:
+                _requester = Thread(
+                    name='REQUEST_'+_target, target=self._q_request, args=(idx, ends), kwargs=kwargs)
+                _requester.start()
+        with self._request_lock:
+            return self._processed
 
     def json_to_df(self, _metric, _data):
         # TODO timeit (git_implementation) vs (my_implementation)
@@ -257,53 +261,33 @@ class GlassHandler(GlassClient):
             framed.index.to_flat_index(), unit='s', infer_datetime_format=True)
         framed.sort_index(inplace=True)
         framed.name = _metric
-        self.print_processed(framed)  # Prints DataFrames
+        self.print_processed(framed)  # [ Comment out to disable auto printing ]
         self._processed.append(framed)
 
-    def _queue_arbiter(self):
-        """ Response queue get method; threads RawResponse -> DataFrame task """
-        while True:
-            try:
-                _metric, _data = self._responses.get(timeout=1)
-                self._reader_writer(_metric, _data)
-                thread_json = Thread(target=self.json_to_df, args=(_metric, _data.json()))
-                thread_json.start()
-                self._responses.task_done()
-            except Empty:
-                logging.debug(f"Q.Empty -> {self._responses.qsize()}")
-                self._ready_plotter.set()
-                break
-
-    def _q_request(self, index: str, endpoint: str, **kwargs) -> None:
-        """ Sends HTTP request to glassnode and puts raw response obj in FIFO queue """
-        metric, data = self.glass_quest(index=index, endpoint=endpoint, **kwargs)
-        self._responses.put([metric, data])
-        self._request_events.set()
-
-    def magic_metrics(self, queries: List[Tuple[str, str, Dict[str, Any]]], update=False) -> List:
-        """ U.I. Layer, pass Tuple['idx', 'endpoint', Dict:[str(param), Any]] """
-        requesting = False
-        for idx, ends, kwargs in queries:
-            _target = f"{idx}_{ends}_{kwargs['a']}"
-            try:
-                if update:
-                    raise OSError
-                logging.debug('>>> TRY BLOCK. . .')
-                arg_tup = _target, self._reader_writer(_target)
-                json_frame = Thread(
-                    name=_target, target=self.json_to_df, args=(*arg_tup,), daemon=True)
-                json_frame.start()
-            except OSError:
-                _requester = Thread(
-                    name=_target, target=self._q_request, args=(idx, ends), kwargs=kwargs, daemon=True)
-                _requester.start()
-                requesting = True
-        if requesting:
-            logging.debug('>>> WAIT -> _request.response_event. . .')
-            self._request_events.wait(timeout=4)
-        self._arbiter.start()
-        self._ready_plotter.wait(timeout=4)
+    def get_processed(self):
         return self._processed
+
+    @staticmethod
+    def print_processed(ready) -> None:
+        """ DataFrame pretty printer """
+        _fat_line = ''.join(['-' for i in range(50)])
+        _formatter = "{}\npandas.DataFrame -> {}\n\n{}\n\n{}\n{}"
+        try:
+            print(_formatter.format('\n'+_fat_line, ready.name, ready, ready.columns, _fat_line+'\n'))
+        except AttributeError:
+            for dp in ready:
+                print(_formatter.format(_fat_line, dp.name, dp, dp.columns, _fat_line))
+
+    @staticmethod
+    def reader_writer(meter, dater=None, _save_dir: str = 'PSEUDO_BASE') -> Any:
+        """  If a metric has been previously saved load save, else request metric """
+        _metric = f"{_save_dir}/{'_'.join(meter.split('/')).upper()}.json"
+        if dater:
+            with open(file=_metric, mode='w') as filer:
+                json.dump(dater.json(), filer)
+        else:
+            with open(file=_metric, mode='r') as filer:
+                return json.loads(filer.readline())
 
 
 def quick_helper(p=True, t=False, a=False) -> None:
@@ -314,9 +298,9 @@ def quick_helper(p=True, t=False, a=False) -> None:
 
 if __name__ == '__main__':
     logging.debug(f'>>> Initialized __ApeQuest__ as {__name__}\n')
-    # meters = (('market', 'price_usd_close', {'a': 'BTC'}),)
-    # foos = GlassHandler()
-    # foobars = foos.magic_metrics(meters)
+    meters = [('market', 'price_usd_close', {'a': 'BTC'})]
+    foos = Glassnodes()
+    foos.magic_metrics(meters)
 
 
 else:
