@@ -4,6 +4,12 @@ import string
 from collections import defaultdict
 
 
+def gen_pins(pin_len: int):
+    nums = string.digits
+    random.seed(os.urandom(1024))
+    return ''.join(random.choice(nums) for quick_pin in range(pin_len))
+
+
 def gen_credentials(name_len: int, pass_len: int):
     """
     Use to generate randomized user name and passwords for API credentials
@@ -71,12 +77,12 @@ def check_env(print_it=False, key=""):
 
     else:
         return env_vars
-    
+
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv, find_dotenv
-    load_dotenv(find_dotenv())
-    print(gen_credentials(name_len=16, pass_len=12))
+    for xyz in range(100):
+        print([gen_pins(6) for i in range(12)])
+    # print(gen_credentials(name_len=16, pass_len=12))
     
     # SET THE NAME KWARG TO RETURN A SPECIFIC 'VALUE' FOR A GIVEN KEY-PAIR
     # testkey = check_env(key='TEST_KEY')
