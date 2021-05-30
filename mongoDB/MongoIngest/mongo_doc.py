@@ -98,9 +98,9 @@ from pymongo import MongoClient
 #         except ConnectionError or ConnectionRefusedError:
 #             self.wrk_collection = None
 #
-#     def ready_client(self, database, collection):
+#     def ready_client(self, live_database, collection):
 #         try:
-#             self.wrk_database = database
+#             self.wrk_database = live_database
 #             self.wrk_collection = collection
 #         except AttributeError or TypeError or ConnectionError:
 #             raise
@@ -115,7 +115,7 @@ from pymongo import MongoClient
 'wombat'
 
 # monClient = r'mongodb://localhost:27017'
-# mC_subset = dict(database='test', collection='testCollection')
+# mC_subset = dict(live_database='test', collection='testCollection')
 #
 # cc = Foobar.initially_as(monClient)
 # cc.ready_client(**mC_subset)
