@@ -6,36 +6,29 @@ from pymongo.monitoring import TopologyListener
 from pymongo.monitoring import ConnectionPoolListener
 from pymongo.monitoring import register
 
-__all__ = [
-    'logging',
-    'CommandLogger',
-    'ServerLogger',
-    'HeartbeatLogger',
-    'TopologyLogger',
-    'ConnectionPoolLogger',
-]
+__all__ = ['logging']
 
 
 class CommandLogger(CommandListener):
     def started(self, event):
-        logging.info(">>> Mongo.cmd[{0.command_name}.requestID({0.request_id})] "
-                     "-> startedOn{0.connection_id}".format(event))
+        logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
+                     "-> START{0.connection_id}".format(event))
 
     def succeeded(self, event):
-        logging.info(">>> Mongo.cmd[{0.command_name}.requestID({0.request_id})] "
-                     "-> completedOn{0.connection_id} "
+        logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
+                     "-> SUCCESS{0.connection_id} "
                      "in {0.duration_micros}ms".format(event))
 
     def failed(self, event):
-        logging.info(">>> Mongo.cmd[{0.command_name}.requestID({0.request_id})] "
-                     "-> failedOn{0.connection_id} "
+        logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
+                     "-> FAILED{0.connection_id} "
                      "in {0.duration_micros}ms".format(event))
 
 
 class ServerLogger(ServerListener):
     def opened(self, event):
         logging.info(">>> Server{0.server_address} "
-                     "-> Added to topology({0.topology_id})".format(event))
+                     "-> Added to topology('{0.topology_id}')\n".format(event))
 
     def description_changed(self, event):
         previous_server_type = event.previous_description.server_type
@@ -55,30 +48,30 @@ class HeartbeatLogger(ServerHeartbeatListener):
         logging.info(">>> PING sent to server {0.connection_id}".format(event))
 
     def succeeded(self, event):
-        logging.info(">>> PING Server{0.server_address} "
+        logging.info(">>> PING Server{0.connection_id} "
                      "-> PONGED -> {0.reply.document}".format(event))
 
     def failed(self, event):
-        logging.warning(">>> PING to Server:[{0.server_address}] "
+        logging.warning(">>> PING to Server:[{0.connection_id}] "
                         "-> NOT PONGED -> {0.reply}".format(event))
 
 
 class TopologyLogger(TopologyListener):
     def opened(self, event):
-        logging.info(">>> Topology(id={0.topology_id}) -> Opened".format(event))
+        logging.info(">>> Topology(id='{0.topology_id}') -> Opened".format(event))
 
     def description_changed(self, event):
-        logging.info(">>> Topology description updated -> Topology(id={0.topology_id})".format(event))
+        logging.info(">>> TopologyDescriptionUpdated(id='{0.topology_id}')".format(event))
         previous_topology_type = event.previous_description.topology_type
-        new_topology_type = event.description.topology_type
+        new_topology_type = event.new_description.topology_type
         if new_topology_type != previous_topology_type:
-            logging.info(">>> Topology(id={0.topology_id}).type(Changed) "
+            logging.info(">>> Topology(id='{0.topology_id}').type(Changed) "
                          "-> {0.new_description.topology_type_name} -> "
                          "{0.new_description.topology_type_name}".format(event))
         if not event.new_description.has_writable_server():
-            logging.warning('>>> No writeable servers available!!!')
+            logging.warning('>>> No <WRITEABLE> servers available!!!')
         if not event.new_description.has_readable_server():
-            logging.warning(">>> No readable servers available!!!")
+            logging.warning(">>> No <READABLE> servers available!!!")
 
     def closed(self, event):
         logging.info('>>> Topology(id={0.topology_id}) -> Closed')
@@ -122,8 +115,8 @@ class ConnectionPoolLogger(ConnectionPoolListener):
                      "-> Connection Checked Out of Pool".format(event))
 
 
-register(CommandLogger())
 register(ServerLogger())
+register(CommandLogger())
+register(TopologyLogger())
 # register(HeartbeatLogger())
-# register(TopologyLogger())
 # register(ConnectionPoolLogger())

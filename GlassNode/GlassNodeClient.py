@@ -1,6 +1,7 @@
-from matplotlib import style
-import matplotlib.pyplot as plt
 # import matplotlib.dates as mdates
+# import mongoDB.Mongos
+import matplotlib.pyplot as plt
+from matplotlib import style
 
 from GlassNodeBroker import *
 
@@ -78,7 +79,7 @@ def big_query(queries, mats=False):
 
 
 if __name__ == '__main__':
-    big_query(['0', '1', '2', '3', '6', '11', '12'])
+    big_query(['0'])
 
     # NODES = MatPlotLibs()
     # NODES.magic_metrics(_known)
