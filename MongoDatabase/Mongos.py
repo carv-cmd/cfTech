@@ -7,7 +7,6 @@ from typing import Any, Optional, Dict, Tuple, List
 from threading import Thread, Event, RLock
 
 from MongoDatabase.monLoggers import logging
-
 logging.basicConfig(level=logging.INFO, format='(%(threadName)-9s) %(message)s')
 
 __all__ = [
@@ -25,8 +24,7 @@ __all__ = [
 ]
 
 
-class MongoBroker:
-
+class RootMongo:
     __slots__ = ('_locker', 'root_client', 'working_db', 'working_col')
 
     def __init__(self,
@@ -37,7 +35,6 @@ class MongoBroker:
                  client: MongoClient = None,
                  database: Database = None,
                  collection: Collection = None):
-        super(MongoBroker, self).__init__()
         self._locker = RLock()
         self.root_client = client
         self.working_db = database
@@ -75,6 +72,12 @@ class MongoBroker:
             self.start_client()
         self.working_db = self.root_client[database_name]
 
+    def set_collection(self, collection_name):
+        raise NotImplementedError()
+
+
+class MongoBroker(RootMongo):
+
     def set_collection(self, collection_name: str) -> None:
         assert self.working_db is not None, 'Need activeDatabase to reference'
         if self.working_col is None:
@@ -100,15 +103,14 @@ class MongoBroker:
         return self.working_db.list_collection_names()
 
     def mongo_insert_one(self, one_dump, col_name: str = None):
-        # self.working_col = self.working_db[col_name]
-        """ Pass data.JSON and the collection name to perform insert on """
-        assert self.working_db and one_dump is not None, '!Insertable'
+        """ Pass loads(JSON) and the collection name to perform insert on """
+        assert self.working_db and one_dump is not None
         self.set_collection(col_name)
         with self._locker:
             self.working_col.insert_one(self.fallback_encoder(one_dump))
 
-    def mongo_insert_many(self, big_dump, col_name: str = None):
-        assert isinstance(big_dump, list), 'insert_many requires an array of documents'
+    def mongo_insert_many(self, big_dump, col_name: str = None) -> None:
+        assert isinstance(big_dump, list), f'type(List[Dox,]) -> passed({type(big_dump)})'
         self.set_collection(collection_name=col_name)
         with self._locker:
             try:
@@ -116,22 +118,28 @@ class MongoBroker:
             except OverflowError:
                 print('Implement insert many fallback handler')
 
-    def mongo_query(self, query_metric: str = None, query_endpoint: str = None):
+    def mongo_query(self, user_defined: dict = None,  metrics: str = None) -> Any:
         assert self.working_col is not None, 'Need activeCollection to query'
-        if query_metric:
+        if user_defined:
+            _cursor = self.working_col.find(user_defined)
+        if metrics:
             _cursor = self.working_col.find(
-                {'_METRIC_': {'$eq': f'{query_endpoint}_{query_metric}'.upper()}})
+                {'_metrics': {'$eq': f'{metrics}'.upper()}})
         else:
             _cursor = self.working_col.find()
+
         try:
             _cursor = list(_cursor)[0]
             return self.fallback_decoder(_cursor)
         except IndexError:
-            logging.warning('!!! Verify mongoElem exists + valid query filter !!!')
+            logging.warning('>>> VERIFY: [DOCUMENT_EXISTS + VALID_QUERY_FILTER]')
+        except NotImplementedError:
+            logging.warning('>>> QUERY FROM CLASS W/ DECODER IF ENCODER WAS IMPLEMENTED')
+            return _cursor
 
     def mongo_update(self):
-        """ TODO Implement updater operators """
-        print('NotImplementedError()')
+        """ TODO Implement updateOperators """
+        pass
 
     def mongo_delete(self, del_db=False) -> None:
         """
@@ -140,6 +148,8 @@ class MongoBroker:
         :param del_db: if true working_db.drop(); else working_col.drop()
         :return: None, check for confirmation in console server logs
         """
+        # TODO Include document.drop()
+        # TODO db.drop_collection needs (drop_collection OR drop_contents)
         if not del_db:
             self.working_db.drop_collection(name_or_collection=self.working_col)
         else:
@@ -164,16 +174,10 @@ class MongoBroker:
 
 
 if __name__ == '__main__':
-    mons = MongoBroker.start_mongo_client(
-        host='127.0.0.1:27017', db='Glassnodes', collect='GlassnodeEndpoints')
-
+    (hosted, dbm, colt) = ('127.0.0.1:27017', 'Glassnodes', 'BTC_24h')
+    mons = MongoBroker.start_mongo_client(host=hosted, db=dbm, collect=colt)
     mons.mongo_delete()
-
-    # _result = mons.mongo_query(query_metric='BTC', query_endpoint='market_price_usd_ohlc')
-
     mons.kill_client()
-
-    # print(f"\n>>> Result: {_result['_DATA_']}")
 
 
 ########################################################
@@ -188,5 +192,5 @@ if __name__ == '__main__':
 
 
 # def quick_wizard(queries):
-#     _glassed = GlassClient()
+#     _glassed = _GlassClient()
 #     return _glassed.glass_quest(index=queries[0], endpoint=queries[1], **queries[2])

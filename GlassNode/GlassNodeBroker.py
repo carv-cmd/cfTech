@@ -12,6 +12,8 @@
 
 import os
 import json
+from queue import LifoQueue
+from _queue import Empty
 from collections import defaultdict
 
 import pandas
@@ -29,8 +31,9 @@ load_dotenv(find_dotenv())
 
 __all__ = [
     '_GlassBroker',
-    'GlassClient',
+    '_GlassClient',
     'Glassnodes',
+    'LongHandler',
     'defaultdict',
     'datetime',
     'logging',
@@ -50,11 +53,10 @@ class LongHandler:
     _DIVS, _LONGS, _MODIFY = '_divMask', '_divKeys', '_divModified'
 
     @staticmethod
-    def _fallback_encoding(long_keys, modify_json,_mask=_MASK, _d=_DIVS, _k=_LONGS, _m=_MODIFY) -> Dict:
-        assert any(long_keys), '_LONG_KEY_CHECK_'
+    def _fallback_encoding(long_keys, modify, _mask=_MASK, _d=_DIVS, _k=_LONGS, _m=_MODIFY) -> Dict:
         logging.info(f'>>> ENCODING._STARTED[<{datetime.now()}>] >>>')
-        _long_keys = list(long_keys.keys())  # TODO Just pass keys as a list to begin with dipshit
-        _modify_json = loads(modify_json)
+        _long_keys = list(long_keys)  # TODO Just pass keys as a list to begin with dipshit
+        _modify_json = loads(modify)
         for elem in _modify_json:
             elem['t'] = elem['t']
             for key in (_nests for _nests in elem.keys() if _nests not in 't'):
@@ -69,7 +71,7 @@ class LongHandler:
     @staticmethod
     def _fallback_decoding(modify, _d=_DIVS, _k=_LONGS, _m=_MODIFY) -> Dict:
         logging.info(f'<<< DECODING._STARTED[<{datetime.now()}>] <<<')
-        _mask, _long_ki, _decode = modify['_DATA_'][_d], modify['_DATA_'][_k], modify['_DATA_'][_m]
+        _mask, _long_ki, _decode = modify['_DATA'][_d], modify['_DATA'][_k], modify['_DATA'][_m]
         for _elem in _decode:
             _elem['t'] = _elem['t']
             try:
@@ -83,27 +85,29 @@ class LongHandler:
         return modify
 
     def glass_encoder(self, _json_decoded, _max_int64=9223372036854774783):
-        _data, _path, _params = _json_decoded
-        _data = _data.json()
-        _data_keys = list(_data[0].keys())[1]
+        _data = _json_decoded[0].json()
+        _data = _data[len(_data)//2:]
+        _data_key = ('v' if 'v' in _data[0] else 'o')
+        logging.info(f'>>> ENCODING._STARTED[<{datetime.now()}>] >>>')
         try:
-            # _fuzzy = [i for i in range(0, len(_data), 500)]
-            fuzz = [dict(filter(lambda elem: elem[1] > _max_int64, _data[i][_data_keys].items()))
-                           for i in range(0, len(_data), 500)][-1:][0]
-            _data = self._fallback_encoding(
-                long_keys=fuzz,
-                modify_json=dumps(_data))
-        except AssertionError:
-            pass
+            _failed = [dict(filter(lambda elem: elem[1] > _max_int64, _data[i][_data_key].items()))
+                       for i in range(0, len(_data), 500)][-1:][0]
+            if any(_failed):
+                _data = self._fallback_encoding(long_keys=list(_failed.keys()), modify=dumps(_data))
         except AttributeError:
-            # print('>>> RAISED ATTRIBUTE ERROR!!!')
-            pass
-        return {'_METRIC_': _path, '_PARAMS_': _params, '_DATA_': _data}
+            _failed = [_data[i][_data_key] for i in range(0, len(_data), 500)
+                       if _data[i][_data_key] > _max_int64]
+            if any(_failed):
+                _data = self._fallback_encoding(long_keys=_failed, modify=dumps(_data))
+        logging.info(f'>>> ENCODING.FINISHED[<{datetime.now()}>] >>>')
+        return {'_metrics': _json_decoded[1], '_parameters': _json_decoded[2], '_data': _data}
 
-    def glass_decoder(self, _json_encoded):
+    def glass_decoder(self, _json_encoded) -> Dict:
         try:
             return self._fallback_decoding(modify=_json_encoded)
         except TypeError:
+            return _json_encoded
+        except KeyError:
             return _json_encoded
 
 
@@ -117,18 +121,20 @@ class _GlassBroker(LongHandler, MongoBroker):
     def __init__(self, start=True, ip='127.0.0.1:27017', db='Glassnodes'):
         super(_GlassBroker, self).__init__(start=start, client_ip=ip, db_name=db)
         self._session = Session()
-        # self._validity = self._load_valid_endpoints()
-
-    def _load_valid_endpoints(self):
-        # TODO Load valid endpoints into a dictionary for assertion reference
-        # TODO _loads_valid_endpoints_ = json.loads(mong.query(_check_valid))
-        pass
 
     @staticmethod
-    def ciso_handler(ts):
+    def ciso_handler(ts) -> str:
         """ Called implicitly when UNIX <-> UTC conversions are called by functions """
         if ts:
             return ciso8601.parse_datetime(ts).strftime('%Y-%m-%d %H:%M')
+
+    def fallback_encoder(self, _json_decoded) -> Dict:
+        """ MongoDB abstract method to guarantee proper encoding of very large nums """
+        return self.glass_encoder(_json_decoded=_json_decoded)
+
+    def fallback_decoder(self, _json_encoded) -> Dict:
+        """ MongoDB abstract method to guarantee proper decoding of very large nums """
+        return self.glass_decoder(_json_encoded=_json_encoded)
 
     def _request(self, req_method: str, target: str, params: Optional[Dict[str, Any]] = None) -> Tuple:
         """
@@ -142,18 +148,18 @@ class _GlassBroker(LongHandler, MongoBroker):
         """
         params['api_key'] = self._API_KEY
         assert 'a' and 'api_key' in params, "MinParams=('asset'+'api_key') you fucking donkey"
-        logging.info(f'* <_Request[ <{datetime.now()}> ] -> {target}\n** ?params={params}')
+        logging.info(f'* <_Request[ <{datetime.now()}> ] -> {target}')
         response = self._session.send(Request(method=req_method, url=target, params=params).prepare())
         response.close()
         _status, _reason = response.status_code, response.reason
-        logging.info(f'* <Response[ <{datetime.now()}> : ({_status}:{_reason}) ]>\n')
+        logging.info(f'* <Response[ <{datetime.now()}> : ({_reason} : {_status}) ]>\n')
         assert response.status_code is 200, 'Metric likely has tiered restrictions'
         return response, '_'.join(target.upper().split('/')[-2:]), params
 
-    def get_metrics(self, index: str, endpoint: str, **kwargs) -> tuple:
+    def get_metrics(self, index: str, endpoint: str, **kwargs) -> Tuple:
         """
         GET/Query -> https://api.glassnode.com/v1/metrics/<user>
-        See GlassClient.glass_quest docstring for all possible kwargs
+        See _GlassClient.glass_quest docstring for all possible kwargs
 
         :param index: API endpoint, ex; index='indicators'
         :param endpoint: API endpoint, ex; endpoint='stock_to_flow_ratio'
@@ -164,37 +170,35 @@ class _GlassBroker(LongHandler, MongoBroker):
         # assert endpoint in self._validity[index], f'{index}/{endpoint} -> Invalid u fucking donkey'
         return self._request('GET', target=f'{self._GLASSNODE}/{index}/{endpoint}', params=kwargs)
 
-    def get_endpoints(self, path=True, tier=False, assets=False) -> List:
+    def update_endpoints(self) -> None:
+        _recent = self._request('GET', target=self._HELPER, params={'a': '_null_helper'})
+        self.mongo_insert_many(_recent[0].json())
+
+    def get_endpoints(self, specified: dict, updates=False) -> List:
         """
-        Query all known glassnode endpoints and their optional parameters
-        Internals are absolute heavy wizardry, see the raw response obj for clarity
-
-        :param path: Get endpoint *omitting glassnode.api prefix
-        :param tier: Get subscription tier required for unrestricted calls
-        :param assets: Get available assets for given endpoint
-
-        :return: None, prints results
+        TODO Examples: { $and: [{"tier": 1}, {"assets.symbol": {"$eq": 'BTC'}}]}
+        :param specified:
+        :param updates:
+        :return:
         """
-        locals_copy = locals().copy()
-        del locals_copy['self']
-        response = self._request('GET', target=self._HELPER, params={'a': '_null_helper'})
-        response = response[0].json()
-        return response
-
-    def fallback_encoder(self, _json_decoded):
-        return self.glass_encoder(_json_decoded=_json_decoded)
-
-    def fallback_decoder(self, _json_encoded):
-        return self.glass_decoder(_json_encoded=_json_encoded)
+        self.set_collection('GlassnodeEndpoints')
+        if updates:
+            self.mongo_delete()
+            self.update_endpoints()
+        if specified:
+            _finder = self.working_col.find(specified)
+        else:
+            _finder = self.working_col.find()
+        return list(_finder)
 
 
-class GlassClient(_GlassBroker):
+class _GlassClient(_GlassBroker):
     """
     * Parameters can be passed to class call or instance method.
 
     * Attributes stored across instances for easy subsequent requests.
 
-    * See GlassClient.glass_quest docstring for parameter details.
+    * See _GlassClient.glass_quest docstring for parameter details.
 
     * REQUIRED -> index: str, endpoint: str, asset_symbol['a']: str.
 
@@ -203,13 +207,16 @@ class GlassClient(_GlassBroker):
     * METRIC-TIMESTAMPS(utc) -> Always refer to start of interval.
     """
 
-    __slots__ = ('a', 's', 'u', 'i', 'f', 'c', 'e', 'timestamp_format', 'index', 'endpoint', 'params')
+    __slots__ = (
+        'a', 's', 'u', 'i', 'f', 'c', 'e', 'timestamp_format',
+        'index', 'endpoint', 'params'
+    )
     _PARAMS = __slots__[0: 8]
 
     def __init__(self, index=None, endpoint=None,
                  a=None, s=None, u=None, i='24h', f='JSON',
                  c=None, e=None, timestamp_format='unix'):
-        super(GlassClient, self).__init__()
+        super(_GlassClient, self).__init__()
         self.a = a            # asset_symbol
         self.s = s            # start_point
         self.u = u            # until_point
@@ -238,7 +245,7 @@ class GlassClient(_GlassBroker):
 
     def glass_quest(self, index: str = None, endpoint: str = None, **kwargs):
         """
-        See 'GlassClient.endpoint_helper' for available endpoints.
+        See '_GlassClient.endpoint_helper' for available endpoints.
 
         * "index": str = ex.'indicators'
         * "endpoint": str = ex.'hash_ribbon'
@@ -267,19 +274,18 @@ class GlassClient(_GlassBroker):
             getattr(self, 'index'), getattr(self, 'endpoint'), **getattr(self, 'params'))
 
 
-class Glassnodes(GlassClient):
-    # Pandas.DataFrame Configuration
-    pandas.set_option('display.width', 120)
+class Glassnodes(_GlassClient):
 
-    __slots__ = ('_mongo_locks', '_request_complete', '_results_ready')
+    __slots__ = ('_response_recv', '_rest_queue', '_mon_locker')
 
     def __init__(self):
         super(Glassnodes, self).__init__()
-        self._mongo_locks = RLock()
-        # self._request_complete = Event()
-        self._results_ready = Event()
+        self._response_recv = Event()
+        self._rest_queue = LifoQueue()
+        self._mon_locker = RLock()
 
     # def json_to_df(self, _metric, _data):
+    #       pandas.set_option('display.width', 120)
     #     # TODO timeit (git_implementation) vs (my_implementation)
     #     #  * df = pd.DataFrame(json.loads(r.text))
     #     #  * df = df.set_index('t')
@@ -304,108 +310,132 @@ class Glassnodes(GlassClient):
     #     self.print_processed(framed)  # [ Comment out to disable auto printing ]
     #     self._processed.append(framed)
     #     return framed
-    #
-    # def get_processed(self) -> List:
-    #     return self._processed
-    #
-    # @staticmethod
-    # def print_processed(ready) -> None:
-    #     """ DataFrame pretty printer """
-    #     _line = ''.join(['-' for i in range(50)])
-    #     _formatter = "{}\npandas.DataFrame -> {}\n\n{}\n\n{}\n{}"
-    #     try:
-    #         print(_formatter.format('\n'+_line, ready.name, ready, ready.columns, _line+'\n'))
-    #     except AttributeError:
-    #         for dp in ready:
-    #             print(_formatter.format(_line, dp.name, dp, dp.columns, _line))
-    # @staticmethod
-    # def reader_writer(meter, dater=None, **kwargs) -> Any:
-    #     """  If a metric has been previously saved load save, else request metric """
-    #     _save_dir: str = 'PSEUDO_BASE'
-    #     _metric = f"{'_'.join(meter.split('/')).upper()}"
-    #     # Mongo_Document_Format -> {_metric: dater.json()}
-    #     if dater:
-    #         logging.debug(f"Response: {dater}")
-    #         # with open(file=f'{_save_dir}/{_metric}.json', mode='w') as filer:
-    #         #     json.dump(dater.json(), filer)
-    #     else:
-    #         with open(file=f'{_save_dir}/{_metric}.json', mode='r') as filer:
-    #             return json.loads(filer.readline())
 
     # def mongo_writer(self, index, endpoint, kwargs):
     #     with self._mongo_locks:
     #         dox = self.glass_quest(index=index, endpoint=endpoint, **kwargs)
     #         self.mongo_insert_one(one_dump=dox, col_name=f"{dox[2]['a'].upper()}_{dox[2]['i']}")
 
-    def mongo_writer(self, index, endpoint, kwargs):
-        with self._mongo_locks:
-            dox = self.glass_quest(index=index, endpoint=endpoint, **kwargs)
-            self.mongo_insert_one(one_dump=dox, col_name=f"{dox[2]['a'].upper()}_{dox[2]['i']}")
+    def _mongo_writer(self):
+        while True:
+            try:
+                self._response_recv.wait(timeout=6)
+                dox = self._rest_queue.get_nowait()
+                # self.glass_encoder(dox)  # -> test encoding schema
+                self.mongo_insert_one(one_dump=dox, col_name=f"{dox[2]['a'].upper()}_{dox[2]['i']}")
+                self._rest_queue.task_done()
+            except Empty:
+                self._rest_queue.all_tasks_done = True
+                break
 
-    def _magic_metrics(self, queries: List[Tuple[str, str, Dict[str, Any]]]):
+    def _requester(self, writer: Thread, queries: Tuple[str, str, Dict[str, Any]]):
         """ U.I. Layer, pass Tuple['idx', 'endpoint', Dict:[str(param), Any]] """
-        for idx, ends, kwargs in queries:
-            _writer = Thread(name='_MON_CLIENT_', target=self.mongo_writer, args=(idx, ends, kwargs))
-            _writer.start()
-            # try:
-            #     # TODO Query database for stored metric before requesting from API
-            #     # raise Exception('RECORD_NOT_FOUND_')
-            # except Exception as e:
-            #     # TODO Determine which exception will raised
-            #     # logging.info(f'<bypass_triggered> : <{e}>')
-            #     # _writer = Thread(name='_MON_CLIENT_', target=self.mongo_writer, args=(idx, ends, kwargs))
-            #     # _writer.start()
-        with self._mongo_locks:
-            logging.warning('>>> _MONGO_LOCK_TERMINATED')
-            self._results_ready.set()
+        with self._mon_locker:
+            self._rest_queue.put(self.glass_quest(index=queries[0], endpoint=queries[1], **queries[2]))
+        try:
+            writer.start()
+        except RuntimeError:
+            pass
+        self._response_recv.set()
+        self._response_recv.clear()
 
-    def magic_metrics(self, big_query: List[tuple]):
-        _root_thread = Thread(name='_ROOT_THREAD', target=self._magic_metrics, args=(big_query,))
-        _root_thread.start()
-        self._results_ready.wait(timeout=5)
-        _root_thread.join()
-        self.kill_client()
+    # def _mongo_reader(self):
+    #     pass
+    #
+    # def _loader(self):
+    #     pass
+
+    def magic_metrics(self, big_query: List[Tuple[str, str, Dict[str, Any]]]):
+        _mon_writes = Thread(name='_MONGO_WRITER', target=self._mongo_writer)
+        for query in big_query:
+            try:
+                raise FileNotFoundError()
+            except FileNotFoundError:
+                _threader = Thread(name='_REQUESTS', target=self._requester, args=(_mon_writes, query,))
+                _threader.start()
+        with self._mon_locker:
+            self._rest_queue.join()
+            self._response_recv.set()
+            self.kill_client()
 
 
-def push_mongo_metrics(mons):
-    _rapid_test = [
-        ('market', 'marketcap_realized_usd', {'a': 'BTC'}),
-        ('market', 'price_drawdown_relative', {'a': 'BTC'}),
-        ('market', 'marketcap_usd', {'a': "BTC"}),
-        ('market', 'mvrv_z_score', {'a': "BTC"}),
-        ('market', 'price_usd_ohlc', {'a': "BTC"}),
-        ('market', 'price_realized_usd', {'a': "BTC"}),
-        ('supply', 'active_more_1y_percent', {'a': 'BTC'}),
-        ('supply', 'current', {'a': 'BTC'}),
-        ('blockchain', 'block_height', {'a': 'BTC'}),
-        ('blockchain', 'block_height', {'a': 'BTC'}),
-        ('indicators', 'stock_to_flow_ratio', {'a': 'BTC'}),
-        ('indicators', 'hash_ribbon', {'a': 'BTC'}),
-        ('indicators', 'difficulty_ribbon', {'a': 'BTC'}),
-        ('indicators', 'realized_profit', {'a': 'BTC'}),
-        ('indicators', 'realized_loss', {'a': 'BTC'}),
-        ('indicators', 'reserve_risk', {'a': 'BTC'}),
-        ('transactions', 'transfers_from_exchanges_count', {'a': 'BTC'}),
-        ('transactions', 'transfers_to_exchanges_count', {'a': 'BTC'})
+def push_mongo(mons: Glassnodes):
+    # ('mining', 'difficulty_mean', {'a': 'BTC'}) wildly overFlows
+    _rapid = [
+        # ('addresses', 'count', {'a': 'BTC'}),
+        # ('addresses', 'sending_count', {'a': 'BTC'}),
+        # ('addresses', 'receiving_count', {'a': 'BTC'}),
+        # ('addresses', 'active_count', {'a': 'BTC'}),
+        # ('addresses', 'new_non_zero_count', {'a': 'BTC'}),
+        # ('market', 'price_usd_close', {'a': 'BTC'}),
+        # ('market', 'marketcap_realized_usd', {'a': 'BTC'}),
+        # ('market', 'price_drawdown_relative', {'a': 'BTC'}),
+        # ('market', 'marketcap_usd', {'a': "BTC"}),
+        # ('market', 'mvrv_z_score', {'a': "BTC"}),
+        # ('market', 'price_usd_ohlc', {'a': "BTC"}),
+        # ('market', 'price_realized_usd', {'a': "BTC"}),
+        # ('supply', 'active_more_1y_percent', {'a': 'BTC'}),
+        # ('supply', 'current', {'a': 'BTC'}),
+        # ('blockchain', 'block_height', {'a': 'BTC'}),
+        # ('indicators', 'sopr', {'a': 'BTC'}),
+        # ('indicators', 'stock_to_flow_ratio', {'a': 'BTC'}),
+        # ('indicators', 'hash_ribbon', {'a': 'BTC'}),
+        # ('indicators', 'difficulty_ribbon', {'a': 'BTC'}),
+        # ('indicators', 'realized_profit', {'a': 'BTC'}),
+        # ('indicators', 'realized_loss', {'a': 'BTC'}),
+        # ('indicators', 'reserve_risk', {'a': 'BTC'}),
+        # ('transactions', 'rate', {'a': 'BTC'}),
+        # ('transactions', 'count', {'a': 'BTC'}),
+        # ('transactions', 'size_mean', {'a': 'BTC'}),
+        # ('transactions', 'size_sum', {'a': 'BTC'}),
+        # ('transactions', 'transfers_volume_sum', {'a': 'BTC'}),
+        # ('transactions', 'transfers_volume_mean', {'a': 'BTC'}),
+        ('transactions', 'transfers_volume_median', {'a': 'BTC'}),
     ]
-    mons.magic_metrics(_rapid_test)
+    mons.magic_metrics(_rapid)
 
 
-def endpoints(glassed):
-    foo_bar = glassed.get_endpoints()
-    glassed.mongo_insert_many(foo_bar, col_name='GlassnodeEndpoints')
+def pull_mongo(mons: Glassnodes):
+    mons.set_collection('BTC_24h')
+    result = mons.mongo_query(metrics=f'market_mvrv_score')
+    print(result[0])
+
+
+def endpoints(glassed: Glassnodes, tier: int = 1, asset: str = 'BTC', update=False):
+    foo_bar = glassed.get_endpoints(
+        specified={'$and': [{"tier": tier}, {"assets.symbol": {"$eq": asset.upper()}}]},
+        updates=update)
+    glassed.kill_client()
+    for fb in foo_bar:
+        print(fb)
+        # print(fb['path'], fb['assets']['tags'])
+        break
+
+
+def endpoint_queries(mons: Glassnodes,
+    tier: int = None, asset: str = None, currencies: str = None, json_csv: str = None
+):
+    # print(locals())
+    mons.set_collection('GlassnodeEndpoints')
+    quick = {'tier': 1, 'asset': 'BTC', 'currencies': 'NATIVE', 'formatting': 'JSON'}
+    to_load = {
+        '$and': [
+            {"tier": quick['tier']},
+            {"assets.symbol": {"$eq": quick['asset'].upper()}}
+        ]
+    }
+    print(mons.mongo_query(user_defined=to_load))
+    pass
 
 
 if __name__ == '__main__':
-    # _PAT, _POINT, _PARA = 'market', 'price_usd_close', {'a': 'BTC'}
-    # _PAT, _POINT, _PARA = 'indicators', 'hash_ribbon', {'a': 'BTC'}
-    # NOTED = GlassClient()
-    # TESTER = NOTED.glass_quest(index=_PAT, endpoint=_POINT, **_PARA)
-    # LongHandler().mongo_encoder(TESTER)
-    # quick_flush()
-    glassed = Glassnodes()
-    # endpoints(glassed)
-    push_mongo_metrics(glassed)
+    glasses = Glassnodes()
+    endpoint_queries(glasses)
+    # endpoints(glasses)
+    # push_mongo(glasses)
+    # pull_mongo(glasses)
+    pass
+
 
 else:
     logging.debug(f'>>> Initialized {__name__} @ <{datetime.now()}>\n')
