@@ -117,6 +117,6 @@ class ConnectionPoolLogger(ConnectionPoolListener):
 
 register(ServerLogger())
 register(CommandLogger())
-register(TopologyLogger())
+# register(TopologyLogger())
 # register(HeartbeatLogger())
 # register(ConnectionPoolLogger())
