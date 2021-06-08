@@ -1,19 +1,17 @@
 # import numpy
 # import timeit
 # import numba
+# from functools import reduce
 import pandas
-
-from GlassNodeBroker import Glassnodes, Tuple, Thread, Queue
+from time import time, ctime
+from GlassNodeBroker import Glassnodes, ciso8601, datetime, Thread, Queue, Any
 
 
 class GlassHelper(Glassnodes):
-    def endpoint_help(self,
-                      tier: str = '1/2/3',
-                      asset: str = 'BTC/ETH',
-                      currencies: str = 'NATIVE/USD',
-                      resolutions: str = "10m/1h/24h/1w/1month",
-                      formatting: str = 'JSON/CSV',
-                      update: bool = False) -> Tuple:
+
+    def endpoint_help(self, tier: str, asset: str,
+                      currencies: str, resolutions: str,
+                      formatting: str, update: bool) -> Any:
         _endpoint_query = {
             "$and": [
                 {"tier": {"$in": [int(n) for n in tier.split('/')]}},
@@ -22,10 +20,48 @@ class GlassHelper(Glassnodes):
                 {"resolutions": {"$in": resolutions.split('/')}},
                 {"formats": {"$in": formatting.upper().split('/')}}]
         }
-        return _endpoint_query, [
-            {'Endpt.Params': dict(filter(lambda elem: elem[0] not in ['_id', 'assets'], endpts.items())),
-             'Endpt.Assets': list(filter(lambda full: full['symbol'] in asset.upper(), endpts['assets']))}
+        return [
+            {'matched': dict(filter(lambda elem: elem[0] not in ['assets'], endpts.items()))}
             for endpts in list(self.get_endpoints(specified=_endpoint_query, updates=update))]
+
+    def quick_query(self,
+                    tier: str = '1/2/3',
+                    asset: str = 'BTC',
+                    currencies: str = 'NATIVE/USD',
+                    resolutions: str = "10m/1h/24h/1w/1month",
+                    formatting: str = 'JSON/CSV',
+                    update: bool = False,
+                    search: list = None,
+                    initialize: dict = None):
+        """
+        Query Glassnode indices/endpoints for available options.
+        Any grouped function parameters should be separated by '/' symbol for safe split.
+
+        :param tier: str = '1/2/3'
+        :param asset: str = 'BTC/ETH'
+        :param currencies: str = 'NATIVE/USD'
+        :param resolutions: str = '10m/1h/24h/1w/1month'
+        :param formatting: str = 'JSON/CSV'
+        :param update: bool = 'True' to update stored endpoints
+        :param search: list = available glassnode indices to return
+        :param : dict = pass to prep glass_quest signature in one call (applies-like-params)
+        :return: Given query filter returns all endpoints for it either semi/fully prepped
+        """
+        _match = self.endpoint_help(
+            **dict(filter(lambda x: x[0] not in ['self', 'search', 'prepare'], locals().copy().items())))
+        self.kill_client()
+        print(_match)
+
+        if search is None:
+            search = list(set(map(lambda idx: idx['matched']['path'].split('/')[-2:-1][0], _match)))
+            print(search)
+        print()
+        try:
+            assert initialize is None, 'prepare != None'
+            prep_map = map(lambda m: m['matched']['path'].split('/')[-2:], _match)
+        except AssertionError as e:
+            prep_map = map(lambda m: (*m['matched']['path'].split('/')[-2:], initialize), _match)
+        return list(filter(lambda pe: pe[0] in search, prep_map))
 
 
 class GlassMongoAPI(Glassnodes):
@@ -33,14 +69,7 @@ class GlassMongoAPI(Glassnodes):
         super(GlassMongoAPI, self).__init__()
         self._pandas_queue = Queue()
 
-    def glass_mongo(self, _rapid_query):
-        """ ('mining', 'difficulty_mean', {'a': 'BTC'}) -> wildly overFlows """
-        _degen_magic = Thread(name='_APP_LEVEL', target=self.magic_metrics(_rapid_query))
-        _degen_magic.start()
-        _degen_magic.join()
-        return self._loaded
-
-    def json_to_df(self, _metric, _data):
+    def glass_pandas(self):
         pandas.set_option('display.width', 120)
         # TODO timeit (git_implementation) vs (my_implementation)
         #  * df = pd.DataFrame(json.loads(r.text))
@@ -50,67 +79,107 @@ class GlassMongoAPI(Glassnodes):
         #  * s = df.v
         #  * s.name = '_'.join(url.split('/')[-2:])
         #  * return s
+        for elem in self.loaded:
+            _metric, _data = elem[1]['_metrics'], elem[1]['_data']
+            try:
+                frame_keys = ['t'] + list(_data[0]['o'].keys())
+                framed = pandas.DataFrame(
+                    data=[{k: (_data[iters]['t'] if k in 't' else _data[iters]['o'][k])
+                           for k in frame_keys} for iters in range(len(_data))],
+                    columns=frame_keys)
+            except KeyError:
+                framed = pandas.DataFrame(_data)
+            framed.set_index('t', inplace=True)
+            framed.index = pandas.to_datetime(
+                framed.index.to_flat_index(), unit='s', infer_datetime_format=True)
+            framed.sort_index(inplace=True)
+            framed.name = _metric
+            print(framed.name)
+            print(framed)
+
+    def glass_mongo(self, _rapid_query):
+        """ ('mining', 'difficulty_mean', {'a': 'BTC'}) -> wildly overFlows """
+        _degen_magic = Thread(name='_APP_LEVEL', target=self.magic_metrics(_rapid_query))
+        _degen_magic.start()
+        _degen_magic.join()
+        return self.loaded
+
+    def flush_mongo(self, dropping: Any = None, checked=True):
         try:
-            frame_keys = ['t'] + list(_data[0]['o'].keys())
-            framed = pandas.DataFrame(
-                data=[{k: (_data[iters]['t'] if k in 't' else _data[iters]['o'][k])
-                       for k in frame_keys} for iters in range(len(_data))],
-                columns=frame_keys)
-        except KeyError:
-            framed = pandas.DataFrame(_data)
-        framed.set_index('t', inplace=True)
-        framed.index = pandas.to_datetime(
-            framed.index.to_flat_index(), unit='s', infer_datetime_format=True)
-        framed.sort_index(inplace=True)
-        framed.name = _metric
-        return framed
-
-
-def q_test(tier=None, asset=None, currencies=None, resolutions=None, formatting=None, update=False):
-    _passed_in = locals().copy()
-    helping = GlassHelper()
-    _lines = ''.join(['-' for i in range(90)])
-    _mon_filter, _matched = helping.endpoint_help(
-        **dict(filter(lambda f: f[1] is not None, _passed_in.items())))
-    helping.kill_client()
-    print(f'\n* QUERY_FILTER:')
-    pprint(_mon_filter, indent=2)
-    print(f"\nFOUND -> [<{len(_matched)}>] VALID ENDPOINTS\n{_lines}\n")
-    # pprint(_matched, indent=2)
-    return _matched
-
-
-def clean_glass(gas_nodes):
-    gas_nodes.mongo_drop_collection(drop_col='BTC_24H', check=True)
-
-
-def glass_test(gas_nodes, _rapids=None):
-    gasser = gas_nodes.glass_mongo(_rapid=_rapids)
-    for i in gasser:
-        try:
-            print(i['_metrics'])  # , i[0]['_data'][0])
-            print('DATABASE')
+            self.mongo_drop_collection(check=checked)
         except TypeError:
-            print(i[0]['_metrics'])  # , i[0]['_data']['_divModified'][0])
-            print('REQUESTED')
+            self.mongo_drop_collection(drop_col=dropping, check=checked)
+
+
+def time_gator(foo_gas: Glassnodes):
+    """
+    1). Response(UTC):
+            * humanized rfc3339 -> str('2021-05-15T00:00:00Z')
+
+    2). Stage1(UTC):
+            * ciso8601.parse_rfc3339  -> dt.obj(2021-05-15 00:00:00+00:00)
+
+    3). Stage2(UTC):
+            * localtime.fromutctimestamp(ciso8601.parse_rfc3339)
+    """
+
+    gator = foo_gas.get_metrics(
+        index='indicators',
+        endpoint='difficulty_ribbon',
+        a='BTC',
+        s=int(foo_gas.ciso_handler('2021-05-15')),
+        i='24h',
+        timestamp_format='humanized'
+    )
+
+    gator = gator[0].json()[15]['t']
+
+    print('\n', type(gator), gator)
+
+    ciso_gator = ciso8601.parse_rfc3339(gator)
+
+    print('\n', type(ciso_gator), ciso_gator)
+
+    print('\n', type(ctime(ciso_gator.timestamp())), ctime(ciso_gator.timestamp()))
+
+    utc_gator = datetime.utcfromtimestamp(ciso_gator.timestamp())
+
+    print('\n', type(ciso_gator), utc_gator)
+
+    print('\n', type(ciso_gator.ctime()), ciso_gator.tzname())
+
 
 
 if __name__ == '__main__':
     from pprint import pprint
-    t, a, r, f = '1', 'BTC', '24h', 'JSON'
-    btc_tuples = q_test(tier=t, asset=a, resolutions=r, formatting=f)
-    redux = [(*btc['Endpt.Params']['path'].split('/')[-2:], {'a': a, 'i': r}) for btc in btc_tuples]
-    pprint(redux)
-
     # GAS_NODES = GlassMongoAPI()
-    # gassed = GAS_NODES.glass_mongo(_rapid=redux)
+    # GAS_NODES.flush_mongo('BTC_24H')
+
+    gh = GlassHelper()
+    a, r = 'BTC', '24h'
+    yeet = gh.quick_query(
+        tier='1/2/3',
+        asset=a,
+        resolutions=r,
+        search=['market'],
+        initialize={'a': a, 's': '2020-01-01', 'i': r}
+    )
+    pprint(yeet, width=120)
+
+
+    # GATORS = GAS_NODES.glass_mongo(btc_tuples[0:29])
+    # print(GATORS)
+
+    # pprint(btc_tuples)  # [0:30])
+    # RACKED = [('indicators', 'difficulty_ribbon', {'a': 'BTC', 'i': '24h'})]
+    # asshole = GAS_NODES.glass_mongo(RACKED)
+
+    # GAS_NODES.glass_pandas()
+    # print(racked)
+
     # pprint(gassed, depth=3)
     # glass_test(GAS_NODES, rapids)
     # clean_glass(GAS_NODES)
-
-
-
-
 
 
     # _line = f"\n{''.join(['_' for e in range(90)])}"

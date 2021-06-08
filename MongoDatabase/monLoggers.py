@@ -16,8 +16,8 @@ class CommandLogger(CommandListener):
 
     def succeeded(self, event):
         logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
-                     "-> SUCCESS{0.connection_id} "
-                     "in {0.duration_micros}ms\n".format(event))
+                     "-> SUCCESS{0.connection_id}"
+                     ":[<{0.duration_micros}>:microseconds]\n".format(event))
 
     def failed(self, event):
         logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
@@ -35,7 +35,7 @@ class ServerLogger(ServerListener):
         new_server_type = event.new_description.server_type
         if new_server_type != previous_server_type:
             logging.info(">>> Server{0.server_address}.type(Changed): "
-                         "{0.previous_description.server_type_name} ->"
+                         "{0.previous_description.server_type_name} -> "
                          "{0.new_description.server_type_name}".format(event))
 
     def closed(self, event):

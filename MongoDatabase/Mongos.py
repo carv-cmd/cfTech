@@ -1,4 +1,3 @@
-from datetime import datetime
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
@@ -11,7 +10,6 @@ logging.basicConfig(level=logging.INFO, format='(%(threadName)-9s) %(message)s')
 
 __all__ = [
     'logging',
-    'datetime',
     'Any',
     'Optional',
     'Dict',
@@ -102,21 +100,12 @@ class RootMongo:
 
 class MongoBroker(RootMongo):
 
-    def mongo_insert_one(self, one_dump, col_name: str = None):
-        """ Pass loads(JSON) and the collection name to perform insert on """
-        assert self.working_db is not None, 'Need active db instance to reference'
-        self.set_collection(col_name)
-        with self._locker:
-            try:
-                self.working_col.insert_one(one_dump)
-            except TypeError:
-                self.working_col.insert_one(self.fallback_encoder(one_dump))
-            except OverflowError:
-                self.working_col.insert_one(self.fallback_encoder(one_dump))
+    def mongo_bulk_write(self):
+        pass
 
-    def mongo_insert_many(self, big_dump, col_name: str = None) -> None:
-        if col_name:
-            self.set_collection(collection_name=col_name)
+    def mongo_insert_many(self, big_dump: list, col_name: str = None) -> None:
+        # assert big_dump is List, 'Insert Many Requires Array/List data structure'
+        self.set_collection(collection_name=col_name)
         with self._locker:
             try:
                 self.working_col.insert_many(big_dump)
@@ -126,18 +115,52 @@ class MongoBroker(RootMongo):
                 logging.warning('Implement insert many fallback handler')
                 raise
 
-    def mongo_query(self, user_defined: dict = None) -> Any:
+    def mongo_insert_one(self, one_dox, col_name: str = None):
+        """
+        Insert single document -> db.collection
+        :param one_dox: type['dict', 'mutable.mapping', 'bson.RAW.doc']
+        :param col_name: str = db.collection.name
+        :return:
+        """
+        assert self.working_db is not None, 'Need active db instance to reference'
+        self.set_collection(col_name)
+        with self._locker:
+            try:
+                self.working_col.insert_one(self.fallback_encoder(one_dox))
+            except NotImplementedError:
+                self.working_col.insert_one(one_dox)
+
+    def mongo_replace_one(self, one_dox, col_name: str = None):
+        """
+        Replaces whole documents, if document doesnt exist insert is performed
+        :param one_dox:
+        :param col_name:
+        :return:
+        """
+        assert self.working_db is not None, 'Need active db instance to reference'
+        self.set_collection(col_name)
+        with self._locker:
+            try:
+                self.working_col.replace_one(
+                    filter={'_metrics': {'$eq': one_dox[1]}},
+                    replacement=self.fallback_encoder(one_dox),
+                    upsert=True)
+            except Exception as e:
+                raise e
+
+    def mongo_query(self, user_defined: dict = None, projection: dict = None) -> Any:
+        """
+        Called first to check if document is in database
+        :param user_defined: Query filter as per MongoDB documentation specifications
+        :return: TODO Determine this
+        """
         assert self.working_col is not None, 'Need activeCollection to query'
         with self._locker:
             if user_defined:
-                _cursor = self.working_col.find(user_defined)
+                _cursor = self.working_col.find(user_defined, projection)
             else:
                 _cursor = self.working_col.find()
-            try:
-                return self.fallback_decoder(list(_cursor))
-            except NotImplementedError:
-                logging.warning('>>> QUERY FROM CLASS W/ DECODER IF ENCODER WAS IMPLEMENTED')
-                return _cursor
+            return self.fallback_decoder(list(_cursor)[0])
 
     def mongo_update(self):
         """ TODO Implement updateOperators """
@@ -151,13 +174,15 @@ class MongoBroker(RootMongo):
         :param check: Must pass check=True to execute db.drop()
         :return: None
         """
-        assert self.root_client is not None, 'Need valid drop references'
+        assert self.root_client is not None, 'Need valid Mongo.client to reference'
+        assert check is True, f'* VERIFY: [check_is_True = {check}]'
         if not drop_db:
             self.root_client.drop_database(name_or_database=self.working_db)
         elif isinstance(drop_db, (Database, str)):
             self.root_client.drop_database(name_or_database=drop_db)
         else:
-            raise TypeError('Invalid.Database: (name/obj) must be PRESET or PASSED to function')
+            # TODO Make db.drop() && db.col.drop() raise ValueError() -> !TypeError
+            raise TypeError('NoLive.db:(name/obj): PRESET|PASSED by caller')
 
     def mongo_drop_collection(self, drop_col: Any = None, check: bool = False) -> None:
         """
@@ -167,13 +192,14 @@ class MongoBroker(RootMongo):
         :param check: Must pass check=True to execute db.collection.drop()
         :return: None
         """
-        assert (self.working_db is not None) and (check is True), f'VERIFY: [Valid_DB + checker={check}]'
+        assert self.working_db is not None, 'Need valid db.instance to reference'
+        assert check is True, f'Invalid: [check_is_True -> {check}]'
         if not drop_col:
             self.working_db.drop_collection(name_or_collection=self.working_col)
         elif isinstance(drop_col, (Collection, str)):
             self.working_db.drop_collection(name_or_collection=drop_col)
         else:
-            raise TypeError("InvalidCollection: (name/obj) must be PRESET or PASSED to function")
+            raise TypeError("NoLive.db.Collection:(col.name/col.obj): PRESET|PASSED by caller ")
 
     def kill_client(self) -> None:
         """
@@ -194,9 +220,9 @@ class MongoBroker(RootMongo):
 
 
 if __name__ == '__main__':
-    (hosted, dbm, colt) = ('127.0.0.1:27017', 'Glassnodes', 'BTC_24h')
+    (hosted, dbm, colt) = ('127.0.0.1:27017', 'Glassnodes', 'GlassPoints')
     mons = MongoBroker.start_mongo_client(host=hosted, db=dbm, collect=colt)
-    mons.mongo_drop_collection()
+    mons.mongo_drop_collection(check=True)
     mons.kill_client()
 
 

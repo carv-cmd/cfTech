@@ -1,13 +1,15 @@
+# from functools import reduce
 import os
 from queue import LifoQueue, Queue
 from _queue import Empty
+from datetime import datetime
 
 import ciso8601
 from requests import Request, Session
 from dotenv import load_dotenv, find_dotenv
 
 from MongoDatabase.Mongos import Any, Optional, Dict, Tuple, List
-from MongoDatabase.Mongos import logging, datetime, Thread, Event, RLock
+from MongoDatabase.Mongos import logging, Thread, Event, RLock
 from MongoDatabase.Mongos import MongoBroker
 
 load_dotenv(find_dotenv())
@@ -15,6 +17,8 @@ load_dotenv(find_dotenv())
 __all__ = [
     'Glassnodes',
     'LongHandler',
+    'ciso8601',
+    'datetime',
     'logging',
     'Thread',
     'Event',
@@ -28,73 +32,117 @@ __all__ = [
 
 
 class LongHandler:
-    _MASK = 65536
-    _DIVS, _LONGS, _MODIFY = '_divMask', '_divKeys', '_divModified'
+    # _UTC_OFFSET = divmod(divmod(time.localtime().tm_gmtoff, 60)[0], 60)[0]
+    _Tm, _Tp, _Td = '_metrics', '_parameters', '_data'
+    _DIVS, _LK, _MODIFY = '_divMask', '_divKeys', '_divModified'
+    _OVERFLOW = 9223372036854774783
+    _MASK = 4294967296
 
     @staticmethod
-    def ciso_handler(ts: str = None):
-        """ Return UNIX equivalent of ISO-8601 timestamp. """
-        if ts:
-            return int(ciso8601.parse_datetime(ts).timestamp())
-
-    @staticmethod
-    def _fallback_encoding(_long_keys, _modify_json, _mask=_MASK, _d=_DIVS, _k=_LONGS, _m=_MODIFY) -> Dict:
-        for elem in _modify_json:
-            elem['t'] = elem['t']
-            for key in (_nested for _nested in elem.keys() if _nested not in 't'):
-                try:
-                    elem[key] = divmod(elem[key], _mask)
-                except TypeError:
-                    for failed in _long_keys:
-                        elem[key][failed] = divmod(elem[key][failed], _mask)
-        return {_d: _mask, _k: _long_keys, _m: _modify_json}
-
-    @staticmethod
-    def _fallback_decoding(decoded, _d=_DIVS, _k=_LONGS, _m=_MODIFY) -> Dict:
-        _mask, _long_ki, _decode = decoded['_DATA'][_d], decoded['_DATA'][_k], decoded['_DATA'][_m]
-        for _elem in _decode:
-            _elem['t'] = _elem['t']
-            try:
-                for _modifier in _long_ki:
-                    _div_o, _mod_o = _elem['o'][_modifier]
-                    _elem['o'][_modifier] = (_div_o * _mask) + _mod_o
-            except KeyError:
-                _div_v, _mod_v = _elem['v']
-                _elem['v'] = (_div_v * _mask) + _mod_v
-        return decoded
-
-    def fallback_encoder(self, _json_decoded, _max_int64=9223372036854774783, scan_skip=1000):
-        _data = _json_decoded[0].json()
-        _sub_key = ('v' if 'v' in _data[0] else 'o')
+    def ciso_handler(ts: Any = None):
         try:
-            _failed = list(
-                [dict(filter(lambda elem: elem[1] > _max_int64, _data[scan][_sub_key].items()))
-                 for scan in range(0, len(_data), scan_skip)][-1:][0].keys()
-            )
-        except AttributeError:
-            _failed = [_data[kth][_sub_key] for kth in range(0, len(_data), scan_skip)
-                       if _data[kth][_sub_key] > _max_int64]
-        if _failed:
-            e_start = datetime.now()
-            _data = self._fallback_encoding(_long_keys=_failed, _modify_json=_data)
-            logging.info(f'* ENCODING.DURATION -> sec(<{(datetime.now() - e_start).total_seconds()}>)\n')
-        return {'_metrics': _json_decoded[1], '_parameters': _json_decoded[2], '_data': _data}
-
-    def fallback_decoder(self, _json_encoded) -> Dict:
-        try:
-            d_start = datetime.now()
-            _deco = self._fallback_decoding(decoded=_json_encoded)
-            logging.info(f'* DECODING.DURATION -> sec(<{(datetime.now() - d_start).total_seconds()}>)\n')
+            print(f'>>> Trying: {ts}')
+            return ciso8601.parse_rfc3339(ts)
+        except ValueError:
+            print(f'>>> Flagged: {ts} for ciso.ts')
+            return ciso8601.parse_datetime(ts).timestamp()
         except TypeError:
-            return _json_encoded
-        except KeyError:
-            return _json_encoded
+            print(f'>>> Flagged: {ts} for dt.utf_from_ts')
+            return datetime.utcfromtimestamp(ts).timestamp()
+
+    @staticmethod
+    def _fallback_encoder(_long_keys, _latter_ki, _decoded,
+                          _mask=_MASK, _d=_DIVS, _k=_LK, _m=_MODIFY) -> Dict:
+        """
+        :param _long_keys: keys flagged for overflow values
+        :param _latter_ki: from -> {'v': Var[str, int, float], 'o': Dict(Any)}
+        :param _decoded: JSON document flagged(int > MongoDB.8byte.limit)
+        :param _mask: class_attr: see default
+        :param _d: class_attr: see default
+        :param _k: class_attr: see default
+        :param _m: class_attr: see default
+
+        :return: {_d: _mask, _k: _long_keys, _m: _decoded}
+        """
+        for _item in _decoded:
+            _item['t'] = ciso8601.parse_rfc3339(_item['t'])
+            try:
+                for failed in _long_keys:
+                    _item[_latter_ki][failed] = divmod(_item[_latter_ki][failed], _mask)
+            except KeyError:
+                _item[_latter_ki] = divmod(_item[_latter_ki], _mask)
+        return {_d: _mask, _k: _long_keys, _m: _decoded}
+
+    @staticmethod
+    def _fallback_decoder(_encoded, _sups, _mask, _long_ki) -> Dict:
+        for _item in _encoded:
+            # _item['t'] = ciso8601.parse_rfc3339(_item['t'])
+            try:
+                for _mod_key in _long_ki:
+                    _div_n1, _div_n2 = _item[_sups][_mod_key]
+                    _item[_sups][_mod_key] = (_div_n1 * _mask) + _div_n2
+            except KeyError:
+                _div_s1, _div_s2 = _item[_sups]
+                _item[_sups] = (_div_s1 * _mask) + _div_s2
+        return _encoded
+
+    def fallback_encoder(self, _json_decoded, _max_int64=_OVERFLOW, scan_skip=1000) -> Dict:
+        """
+        Moderate wizardry, as mongoOverFlow errors are interesting to handle.
+        Scans for overflow conditions, if none return basic local format.
+        If conditional; use divmod w/ class.attr mask saved in _data dictionary if ever needed.
+        Consider long term growth of int > max_int64; set mask accordingly to avoid future reformatting.
+        Current _MASK value is ideal for most conditions; stability is not guaranteed if changed.
+
+        :param _json_decoded: Raw json response format from GlassnodeAPI
+        :param _max_int64: Safe max integer size to store in MongoDB
+        :param scan_skip: interval of in-range-skip
+
+        :return: {_metrics: dict, _parameters: dict, _process: encoded_response}
+        """
+        _process = _json_decoded[0].json()
+        _super_key = ('v' if 'v' in _process[0] else 'o')
+        try:
+            _unsafe = [[k for k, v in _process[ix][_super_key].items() if v > _max_int64]
+                       for ix in range(0, len(_process), scan_skip)].pop()
+        except TypeError:
+            _unsafe = list(filter(lambda fails: fails[_super_key] > _max_int64,
+                                  [_process[ix] for ix in range(0, len(_process), scan_skip)])).pop()
+        if _unsafe:
+            _process = self._fallback_encoder(_long_keys=_unsafe, _latter_ki=_super_key, _decoded=_process)
+        return {self._Tm: _json_decoded[1], self._Tp: _json_decoded[2], self._Td: _process}
+
+    def fallback_decoder(self, _json_encoded, _d=_DIVS, _k=_LK, _m=_MODIFY) -> Dict:
+        """
+        Decodes divmod.hakd datasets. See encoder for reasoning why.
+
+        :param _json_encoded: dict: local_encoding_JSON
+        :param _d: class_attr: default('_divMask', divmod.divisor)
+        :param _k: class_attr: default('_divKeys', overFlow.keys)
+        :param _m: class_attr: default('_divModified', modified.data)
+
+        :return: Dict[(str: metric), (dict: parameters), (dict: data)]
+        """
+        try:
+            _encoded = _json_encoded[self._Td]
+            _decoded = self._fallback_decoder(
+                _encoded=_encoded[_m],
+                _sups=('v' if 'v' in _encoded[_m][0] else 'o'),
+                _mask=_encoded[_d],
+                _long_ki=_encoded[_k],
+            )
+        except Exception as e:
+            raise e
+        return {self._Tm: _json_encoded[self._Tm], self._Tp: _json_encoded[self._Tp], self._Td: _decoded}
 
 
 class _GlassBroker(LongHandler, MongoBroker):
+    # Create .env file, save api_key under GLASSNODE, import with dotenv module
+    _API_KEY = os.getenv('GLASSNODE')
+
+    # If root paths are updated by vendor change class variables below
     _GLASSNODE = "https://api.glassnode.com/v1/metrics"
     _HELPER = "https://api.glassnode.com/v2/metrics/endpoints"
-    _API_KEY = os.getenv('GLASSNODE')
 
     __slots__ = ('_session',)
 
@@ -113,17 +161,15 @@ class _GlassBroker(LongHandler, MongoBroker):
         :return: dict(key=request_endpoint, value=[asset_name, response.json])
         """
         assert 'a' in params, "minParams=('asset')"
-        logging.info(f'* <Request@[ <{datetime.now()}> ] -> {target}')
+        logging.info(f'* <Request@[<{datetime.now()}>]>')
         response = self._session.send(Request(
             method=req_method, url=target, params={**params, **{'api_key': self._API_KEY}}).prepare())
         response.close()
-        _response_code = response.status_code
-        logging.info(f'* <Response[ <{datetime.now()}> : ({response.reason} : {_response_code}) ]>\n')
-        assert _response_code is 200, 'Response.status.reason -> checkLogs'
+        logging.info(f'* <Response[<{datetime.now()}>:({response.reason}:{response.status_code})]>\n')
+        assert response.status_code is 200, f'Response.status.reason -> SEE_LOGS\nURL: {response.url}'
         return response, '_'.join(target.upper().split('/')[-2:]), params
 
     def get_metrics(self, index: str, endpoint: str, **kwargs) -> Tuple:
-        # TODO assert endpoint in self._validity[index], f'{index}/{endpoint}->Invalid'
         """
         GET/Query -> https://api.glassnode.com/v1/metrics/<user>
         See _GlassClient.glass_quest docstring for all possible kwargs
@@ -136,7 +182,7 @@ class _GlassBroker(LongHandler, MongoBroker):
         """
         return self._request('GET', target=f'{self._GLASSNODE}/{index}/{endpoint}', params=kwargs)
 
-    def get_endpoints(self, specified: dict = None, updates=False) -> List:
+    def get_endpoints(self, specified: Dict = None, updates=False):  # -> List:
         """
         :param specified: ex. { $and: [{"tier": 1}, {"assets.symbol": {"$eq": 'BTC'}}]}
         :param updates: if true, db.GlassPoints.drop, db.GlassPoints.insert(request); else db.loader
@@ -144,13 +190,15 @@ class _GlassBroker(LongHandler, MongoBroker):
         """
         if updates:
             self.mongo_drop_collection('GlassPoints', check=updates)
-            _recent = self._request('GET', target=self._HELPER, params={'a': '_null_'})
-            self.mongo_insert_many(_recent[0].json(), col_name='GlassPoints')
+            _recent = self._request('GET', target=self._HELPER, params={'a': '_null_'})[0].json()
+            for eps in _recent:
+                eps['path'] = eps['path'].split('/')[-2:]
+            self.mongo_insert_many(big_dump=_recent, col_name='GlassPoints')
         self.set_collection(collection_name='GlassPoints')
         if specified:
-            _finder = self.working_col.find(specified)
+            _finder = self.working_col.find(specified, projection={'_id': False})
         else:
-            _finder = self.working_col.find()
+            _finder = self.working_col.find(projection={'_id': False})
         return list(_finder)
 
 
@@ -178,23 +226,53 @@ class _GlassClient(_GlassBroker):
     def __init__(self, index=None, endpoint=None,
                  a=None, s=None, u=None, i='24h', f='JSON',
                  c=None, e=None, timestamp_format='unix'):
+        """
+
+        * EXAMPLE START/UNTIL TIMESTAMPS BELOW:
+        * All timestamps defined in <UTC>
+
+        Monthly resolution: -> (May:2019)
+         * <2019-05-01 00:00> TO <2019-05-31 23:59>
+        Weekly resolution: -> (Week:20)
+         * <2019-05-13 00:00> TO <2019-05-19 23:59>
+        Daily resolution: -> (Day:5)
+         * <2019-05-13 00:00> TO <2019-05-13 23:59>
+        Hourly resolution:
+         * <2019-05-13 10:00> TO <2019-05-13 10:59>
+        10 Min resolution:
+         * <2019-05-13 10:20> TO <2019-05-13 10:29>
+
+        * "API_KEY": str = autofill(SEE: _GlassBroker.class.attrs)
+
+        :param index: str = ex.'indicators'
+        :param endpoint: str = ex.'hash_ribbon'
+        :param a: str = asset('BTC')
+        :param s: str = ISO-8601: [YYYY-MM-DD HH:MM]
+        :param u: str = ISO-8601: [YYYY-MM-DD HH:MM]
+        :param i: str = freq_interval(['1h', '24h', '10m', '1w', '1month'])
+        :param f: str = format(['JSON', 'CSV'])
+        :param c: str = currency(['NATIVE', 'USD'])
+        :param e: str = exchange(['aggregated','binance','bittrex','coinex','gate.io','huobi','poloniex'])
+        :param timestamp_format: str = [use('UNIX'), 'humanized(RFC-3339)']
+
+        """
         super(_GlassClient, self).__init__()
-        self.a = a            # asset_symbol
-        self.s = s            # start_point
-        self.u = u            # until_point
-        self.i = i            # resolution_interval
-        self.f = f            # response_format
-        self.c = c            # currency
-        self.e = e            # exchange_name
+        self.a = a
+        self.s = s
+        self.u = u
+        self.i = i
+        self.f = f
+        self.c = c
+        self.e = e
         self.timestamp_format = timestamp_format
         self.index = index
         self.endpoint = endpoint
         self.params = \
-            {k: (self.ciso_handler(ve) if k in ('s', 'u') else ve)
-             for k, ve in locals().copy().items() if k in self._PARAMS}
+            {p_key: (self.ciso_handler(p_val) if p_key in ('s', 'u') else p_val)
+             for p_key, p_val in locals().copy().items() if p_key in self._PARAMS}
 
     def set_attributes(self, **kwargs):
-        """ Set class attributes. _PRIVATE """
+        """ Class attribute setter. _PRIVATE """
         foo_copy = getattr(self, 'params').copy()
         for pos_key, pos_val in kwargs.items():
             if pos_key in 'kwargs':
@@ -209,38 +287,13 @@ class _GlassClient(_GlassBroker):
 
     def glass_quest(self, index: str = None, endpoint: str = None, **kwargs):
         """
+        Class object to set/get request method attributes, sets default formatting/freq/ts
+        Make repetitive requests w/ only single new attribute passed in each method call
 
-        -- REQUEST PARAMETERS --
-         * "index": str = ex.'indicators'
-         * "endpoint": str = ex.'hash_ribbon'
-         * "a": str = ex.'BTC'
-         * "s": int = ISO-8601:[YYYY-MM-DD HH:MM] (examples below)
-         * "u": int = ISO-8601:[YYYY-MM-DD HH:MM] (examples below)
-         * "i": str = freq_interval(['1h', '24h', '10m', '1w', '1month'])
-         * "f": str = format(['JSON', 'CSV'])
-         * "c": str = currency(['NATIVE', 'USD'])
-         * "e": str = ['aggregated','binance','bittrex','coinex','gate.io','huobi','poloniex']
-         * "timestamp_format": str = 'unix'.try('humanized(RFC-3339)')
-         * "api_key": str = autofill(see_base_class_attrs)
-
-        -- TIMESTAMP EXAMPLES FOR START/UNTIL INTERVALS --
-
-         * Monthly resolution: 2019-05-01
-           -> 2019-05-01 00:00 UTC to 2019-05-31 23:59 UTC (May 2019)
-
-         * Weekly resolution: 2019-05-13
-           -> 2019-05-13 00:00 UTC to 2019-05-19 23:59 UTC (Week 20)
-
-         * Daily resolution: 2019-05-13
-           -> 2019-05-13 00:00 UTC to 2019-05-13 23:59 UTC
-
-         * Hourly resolution: 2019-05-13 10:00 UTC
-           -> 2019-05-13 10:00 UTC to 2019-05-13 10:59 UTC
-
-         * 10 Min resolution: 2019-05-13 10:20 UTC
-           -> 2019-05-13 10:20 UTC to 2019-05-13 10:29 UTC
-
-        :return: tuple('index_endpoint_asset', Response)
+        :param index: <ex>: api.glassnode.com/v1/metrics/<index>
+        :param endpoint: <ex>: api.glassnode.com/v1/metrics/index/<endpoint>
+        :param kwargs: request parameters, use higher level classes to ensure stability
+        :return: Tuple[Response, 'index_endpoint', params]
         """
         qc = locals().copy()
         if index and endpoint is not None:
@@ -250,50 +303,52 @@ class _GlassClient(_GlassBroker):
         if any(qc['kwargs']):
             self.set_attributes(kwargs=qc['kwargs'])
         assert self.index and self.endpoint and self.params['a'] is not None, \
-            "REQUIRED ATTRIBUTES are REQUIRED at some point. . ."
+            "REQUIRED ATTRIBUTES required before request call"
         return self.get_metrics(
             getattr(self, 'index'), getattr(self, 'endpoint'), **getattr(self, 'params'))
 
 
-class Glassnodes(_GlassClient, LongHandler, MongoBroker):
+class Glassnodes(_GlassClient, LongHandler):
 
-    __slots__ = ('_response_recv', '_mon_locker', '_queued', '_loaded')
+    __slots__ = ('_response_recv', '_mon_locker', '_queued', 'loaded')
 
     def __init__(self):
         super(Glassnodes, self).__init__()
         self._response_recv = Event()
         self._mon_locker = RLock()
         self._queued = LifoQueue()
-        self._loaded = []
+        self.external_flag = Event()
+        self.loaded = []
 
-    def _mongo_reader(self, q_filter):
-        if 'i' not in q_filter:
-            q_filter[2]['i'] = self.params['i']
-        self.set_collection(collection_name=f"{q_filter[2]['a']}_{q_filter[2]['i']}".upper())
-        _load_cursor = self.mongo_query(
-            user_defined={'_metrics': {'$eq': f'{q_filter[0]}_{q_filter[1]}'.upper()}})
-        try:
-            return _load_cursor[0]
-        except IndexError:
-            raise AssertionError('Query Cursor Empty')
+    def _mongo_response_loader(self):
+        """
 
-    def _mongo_writer(self):
+        :return:
+        """
         while True:
             try:
-                self._response_recv.wait(timeout=6)
-                _dox = self._queued.get_nowait()
-                self.mongo_insert_one(
-                    one_dump=_dox, col_name=f"{_dox[2]['a']}_{_dox[2]['i']}".upper())
-                self._loaded.append(self.mongo_query({'_metrics': {'$eq': _dox[1]}}))
+                self._response_recv.wait(timeout=8)
+                _dox = self._queued.get(timeout=0.01)
+                # self.mongo_replace_one(one_dox=_dox, col_name=f"{_dox[2]['a']}_{_dox[2]['i']}".upper())
+                self.mongo_insert_one(one_dox=_dox, col_name=f"{_dox[2]['a']}_{_dox[2]['i']}".upper())
+                self.loaded.append(self.mongo_query({'_metrics': {'$eq': _dox[1]}}))
                 self._queued.task_done()
             except Empty:
                 self._queued.all_tasks_done = True
                 break
 
     def _requester(self, writer: Thread, queries: Tuple[str, str, Dict[str, Any]]):
-        """ U.I. Layer, pass Tuple['idx', 'endpoint', Dict:[str(param), Any]] """
+        """
+
+        :param writer:
+        :param queries:
+        :return:
+        """
         with self._mon_locker:
-            self._queued.put(self.glass_quest(index=queries[0], endpoint=queries[1], **queries[2]))
+            try:
+                self._queued.put(self.glass_quest(index=queries[0], endpoint=queries[1], **queries[2]))
+            except IndexError:
+                self._queued.put(self.glass_quest(index=queries[0], endpoint=queries[1], **self.params))
         try:
             writer.start()
         except RuntimeError:
@@ -301,31 +356,59 @@ class Glassnodes(_GlassClient, LongHandler, MongoBroker):
         self._response_recv.set()
         self._response_recv.clear()
 
-    def magic_metrics(self, big_query: List[Tuple[str, str, Dict[str, Any]]]):
-        _mon_writes = Thread(name='_MONGO_WRITER', target=self._mongo_writer)
+    def _mongo_reader(self, q_filter: Tuple[str, str, Dict[str, Any]]):
+        """
+
+        :param q_filter:
+        :return:
+        """
+        if 'i' not in q_filter:
+            q_filter[2]['i'] = self.params['i']
+        self.set_collection(collection_name=f"{q_filter[2]['a']}_{q_filter[2]['i']}".upper())
+        return self.mongo_query(
+            user_defined={'_metrics': {'$eq': f'{q_filter[0]}_{q_filter[1]}'.upper()}})
+
+    def magic_metrics(self, big_query: List[Tuple[str, str, Dict[str, Any]]]) -> None:
+        """
+        Batch query Glassnode metrics.
+        :param big_query: List[Tuple['index', 'endpoint', {'a': 'sym'}]
+        :return: None
+        """
+        _mon_writes = Thread(name='_MONGO_WRITER', target=self._mongo_response_loader)
         for query in big_query:
             try:
-                self._loaded.append(self._mongo_reader(query))
-            except AssertionError:
+                self.loaded.append(self._mongo_reader(query))
+                self.set_attributes(kwargs=query[2])
+            except IndexError:
                 _requester = Thread(
-                    name="REQUESTING", target=self._requester, args=(_mon_writes, query,), daemon=True)
+                    name="REQUESTING", target=self._requester, args=(_mon_writes, query), daemon=True)
                 _requester.start()
         with self._mon_locker:
             self._response_recv.set()
             self._queued.join()
             self.kill_client()
+            self.external_flag.set()
+
+    def get_loaded(self):
+        return self.loaded
 
 
 if __name__ == '__main__':
-    # for i in range(10):
-    #     glasses.fallback_encoder(_jazzy)
-    #
-    # _jaz = _jazzy[0].json()
-    # print(f'\n>>> Conversions Array Length: {len(_jaz)}')
-    # print(f"Initial: {_jaz[2500]['o']}")
-    # print(f"Encoded: {glasses.fallback_encoder(_jazzy)['_data']['_divModified'][2500]['o']}")
-    pass
+    from pprint import pprint
+    tup = [
+        # ('indicators', 'difficulty_ribbon', {'a': 'BTC', 's': '2020-05-01', 'i': '24h'}),
+        ('market', 'price_usd_close', {})
+        # ('indicators', 'hash_ribbon'),
+        # ('indicators', )
+    ]
+    foo_glass = _GlassBroker()
+    # time_gator(foo_glass)
 
+    # # sus = foo_glass.ciso_handler('2021-05-16T00:00:00Z')
+    # # print(foo_glass)
+    # # print(sus)
+    # # sus2 = foo_glass.ciso_handler(1619841600)
+    # # print(sus2)
 
 else:
     logging.debug(f'>>> Initialized {__name__} @ <{datetime.now()}>\n')
