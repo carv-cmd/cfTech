@@ -1,8 +1,8 @@
 # from functools import reduce
+# import time
 import os
-import time
 from datetime import datetime
-from threading import Event, Lock
+from threading import Event
 from queue import LifoQueue, Queue
 from _queue import Empty
 
@@ -34,8 +34,8 @@ __all__ = [
 
 
 class LongHandler:
-    _Tm, _Tp, _Td = '_metrics', '_parameters', '_data'
-    _DIVS, _LK, _MODIFY = '_divMask', '_divKeys', '_divModified'
+    _Tm, _Tp, _Td = 'Metrics', 'Parameters', 'Datas'
+    _DIVS, _LK, _MODIFY = 'DivMask', 'DivKeys', 'DivModified'
     _OVERFLOW = 9223372036854774783
     _MASK = 4294967296
 
@@ -50,10 +50,11 @@ class LongHandler:
             return ts
 
     @staticmethod
-    def _fallback_encoder(_long_keys, _latter_ki, _decoded,
-                          _mask=_MASK, _d=_DIVS, _k=_LK, _m=_MODIFY) -> Dict:
+    def _fallback_encoder(_long_ki, _latter_ki, _decoded, _mask=_MASK, _d=_DIVS, _k=_LK, _m=_MODIFY) -> Dict:
         """
-        :param _long_keys: keys flagged for overflow values
+        Work around for MongoDB 8-byte int limit that retains int accuracy at its full resolution
+
+        :param _long_ki: keys flagged for overflow values
         :param _latter_ki: from -> {'v': Var[str, int, float], 'o': Dict(Any)}
         :param _decoded: JSON document flagged(int > MongoDB.8byte.limit)
         :param _mask: class_attr: see default
@@ -67,15 +68,15 @@ class LongHandler:
         for _item in _decoded:
             _item['t'] = ciso8601.parse_rfc3339(_item['t'])
             try:
-                for failed in _long_keys:
+                for failed in _long_ki:
                     _item[_latter_ki][failed] = divmod(_item[_latter_ki][failed], _mask)
             except TypeError:
                 _item[_latter_ki] = divmod(_item[_latter_ki], _mask)
-        logging.info(f'-> ENCODING.TIME(<{(datetime.now() - _start).total_seconds()}>) -> {_long_keys}\n')
-        return {_d: _mask, _k: _long_keys, _m: _decoded}
+        logging.info(f'-> ENCODING.TIME(<{(datetime.now() - _start).total_seconds()}>) -> {_long_ki}\n')
+        return {_d: _mask, _k: _long_ki, _m: _decoded}
 
     @staticmethod
-    def _fallback_decoder(_encoded, _latter_ki, _mask, _long_ki) -> Dict:
+    def _fallback_decoder(_long_ki, _latter_ki, _encoded, _mask) -> Dict:
         # _item['t'] = ciso8601.parse_rfc3339(_item['t'])
         _start = datetime.now()
         for _item in _encoded:
@@ -89,30 +90,28 @@ class LongHandler:
         logging.info(f'-> DECODING.TIME(<{(datetime.now() - _start).total_seconds()}>) -> {_long_ki}\n')
         return _encoded
 
-    def fallback_encoder(self, _json_decoded, _max_int64=_OVERFLOW, scan_skip=1000) -> Dict:
+    def fallback_encoder(self, _json_decoded, _max_int64=_OVERFLOW) -> Dict:
         """
-        Moderate wizardry, as mongoOverFlow errors are interesting to handle.
-        Scans for overflow conditions, if none return basic local format.
+        Scans len(1/10) for overflow conditions, if none return basic local formatting.
         If conditional; use divmod w/ class.attr mask saved in _data dictionary if ever needed.
         Consider long term growth of int > max_int64; set mask accordingly to avoid future reformatting.
         Current _MASK value is ideal for most conditions; stability is not guaranteed if changed.
 
         :param _json_decoded: Raw json response format from GlassnodeAPI
         :param _max_int64: Safe max integer size to store in MongoDB
-        :param scan_skip: interval of in-range-skip
-
         :return: {_metrics: dict, _parameters: dict, _process: encoded_response}
         """
         _process = _json_decoded[0].json()
         _super_key = ('v' if 'v' in _process[0] else 'o')
+        _scan_skip = len(_process) // 10
         try:
             _unsafe = [[k for k, v in _process[ix][_super_key].items() if v > _max_int64]
-                       for ix in range(0, len(_process), scan_skip)].pop()
+                       for ix in range(0, len(_process), _scan_skip)].pop()
         except AttributeError:
-            _unsafe = [[_process[ix][_super_key] for ix in range(0, len(_process), scan_skip)
+            _unsafe = [[_process[ix][_super_key] for ix in range(0, len(_process), _scan_skip)
                         if _process[ix][_super_key] > _max_int64]].pop()
         if _unsafe:
-            _process = self._fallback_encoder(_long_keys=_unsafe, _latter_ki=_super_key, _decoded=_process)
+            _process = self._fallback_encoder(_long_ki=_unsafe, _latter_ki=_super_key, _decoded=_process)
         return {self._Tm: _json_decoded[1], self._Tp: _json_decoded[2], self._Td: _process}
 
     def fallback_decoder(self, _json_encoded, _d=_DIVS, _k=_LK, _m=_MODIFY) -> Dict:
@@ -129,10 +128,10 @@ class LongHandler:
         try:
             _encoded = _json_encoded[self._Td]
             _decoded = self._fallback_decoder(
-                _encoded=_encoded[_m],
+                _long_ki=_encoded[_k],
                 _latter_ki=('v' if 'v' in _encoded[_m][0] else 'o'),
-                _mask=_encoded[_d],
-                _long_ki=_encoded[_k]
+                _encoded=_encoded[_m],
+                _mask=_encoded[_d]
             )
         except TypeError:
             _decoded = _json_encoded
@@ -167,11 +166,6 @@ class _GlassBroker(LongHandler, MongoBroker):
         response = self._session.send(Request(
             method=req_method, url=target, params={**params, **{'api_key': self._API_KEY}}).prepare())
         response.close()
-        (reason, stat_code, url) = (response.reason, response.status_code, response.url)
-        resp_str = f'* <RESPONSE[<{datetime.now()}>:({reason}:{stat_code})]>'
-        assert stat_code != 429, f"{resp_str}\n?{url}"
-        assert stat_code != 403, f"{resp_str}\n?{url}"
-        assert stat_code == 200, f"{resp_str}"
         return response, '_'.join(target.upper().split('/')[-2:]), params
 
     def get_metrics(self, index: str, endpoint: str, **kwargs) -> Tuple:
@@ -291,7 +285,9 @@ class _GlassClient(_GlassBroker):
 
 class Glassnodes(_GlassClient, LongHandler):
 
-    __slots__ = ('_mon_writes', '_response_recv', '_mon_locker', '_queued', 'external_flag', 'loaded')
+    __slots__ = (
+        '_mon_writes', '_response_recv', '_mon_locker', '_queued', 'external_flag', 'loaded', 'req_rejects'
+    )
 
     def __init__(self):
         super(Glassnodes, self).__init__()
@@ -307,12 +303,11 @@ class Glassnodes(_GlassClient, LongHandler):
         :return:
         """
         while True:
-            # self.mongo_replace_one(one_dox=_dox, col_name=f"{_dox[2]['a']}_{_dox[2]['i']}".upper())
             try:
                 self._response_recv.wait(timeout=8)
                 _dox = self._queued.get(timeout=0.01)
                 self.mongo_insert_one(one_dox=_dox, col_name=f"{self.params['a']}_{self.params['i']}".upper())
-                self.loaded.append(self.mongo_query({'_metrics': {'$eq': _dox[1]}}, projection={'id': False}))
+                self.loaded.append(self.mongo_query({self._Tm: {'$eq': _dox[1]}}, projection={'id': False}))
                 self._queued.task_done()
             except Empty:
                 self._queued.all_tasks_done = True
@@ -332,9 +327,18 @@ class Glassnodes(_GlassClient, LongHandler):
             except IndexError:
                 _passing = self.params
             finally:
-                self._queued.put(self.glass_quest(index=queries[0], endpoint=queries[1], **_passing))
-                self._response_recv.set()
-                self._response_recv.clear()
+                _data = self.glass_quest(index=queries[0], endpoint=queries[1], **_passing)
+                (stat_code, reason, rejected_url) = (_data[0].status_code, _data[0].reason, _data[0].url)
+                _response_str = f'* <RESPONSE[<{datetime.now()}>:({_data[0].reason}:{_data[0].status_code})]>'
+                _rejected = f"{_response_str}?<{rejected_url}>"
+        if stat_code == 429:
+            logging.warning(_rejected)
+        elif stat_code == 403:
+            logging.warning(_rejected)
+        elif stat_code == 200:
+            self._queued.put(_data)
+            self._response_recv.set()
+            self._response_recv.clear()
 
     def _mongo_reader(self, q_filter: Tuple[str, str, Dict[str, Any]]):
         """
@@ -347,8 +351,8 @@ class Glassnodes(_GlassClient, LongHandler):
             pass
         self.set_collection(collection_name=f"{self.params['a']}_{self.params['i']}".upper())
         return self.mongo_query(
-            user_defined={'_metrics': {'$eq': f'{q_filter[0]}_{q_filter[1]}'.upper()}},
-            projection={'_id': False}
+            user_defined={self._Tm: {'$eq': f'{q_filter[0]}_{q_filter[1]}'.upper()}},
+            projection={'_id': False, self._Tp: False}
         )
 
     def magic_metrics(self, big_query: List[Tuple[str, str, Dict[str, Any]]]) -> None:
@@ -365,10 +369,6 @@ class Glassnodes(_GlassClient, LongHandler):
             except IndexError:
                 _requester = Thread(name="REQUESTING", target=self._requester, args=(query, ), daemon=True)
                 _requester.start()
-            except AssertionError as e:
-                # time.sleep(61)
-                # print(e)
-                pass
         with self._mon_locker:
             self._queued.join()
             self._response_recv.set()
@@ -384,13 +384,13 @@ if __name__ == '__main__':
     tup = [
         ('market', 'price_usd_close', {'a': 'BTC', 's': '2020-05-01', 'i': '24h'}),
         ('indicators', 'difficulty_ribbon'),
-        # ('market', 'price_usd_ohlc'),
-        # ('indicators', 'hash_ribbon')
+        ('market', 'price_usd_ohlc'),
+        ('indicators', 'hash_ribbon')
     ]
     fached = Glassnodes()
     fached.magic_metrics(tup)
     fached.external_flag.wait()
-    # pprint(fached.get_loaded(), width=120)
+    pprint(fached.get_loaded(), width=360)
 
     # fached.mongo_drop_collection(drop_col='BTC_24H', check=True)
 

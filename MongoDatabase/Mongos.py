@@ -62,9 +62,11 @@ class RootMongo:
 
     def set_database(self, database_name: str) -> None:
         """
-        Set working database object instance if not passed to class constructor
+        Sets MongoClient.db.instance pointer.
+        If database does not exist, one is created on method call.
+
         :param database_name: DatabaseName -> str
-        :return: None, setter_method
+        :return: None -> Indicates successful setter.op
         """
         assert self.root_client is not None, 'Need active client to reference'
         try:
@@ -72,14 +74,29 @@ class RootMongo:
                 self.working_db = self.root_client.get_database(name=database_name)
         except AttributeError:
             self.working_db = self.root_client.get_database(name=database_name)
+        except Exception as e:
+            raise e
+        finally:
+            return None
 
     def set_collection(self, collection_name: str) -> None:
+        """
+        Sets db.collection.instance pointer.
+        If collection does not exist, one is created on method call.
+
+        :param collection_name: str: Collection.name
+        :return: None -> Indicates successful setter.op
+        """
         assert self.working_db is not None, 'Need activeDatabase to reference'
         try:
             if collection_name is not self.working_col.name:
                 self.working_col = self.working_db.get_collection(name=collection_name)
         except AttributeError:
             self.working_col = self.working_db.get_collection(name=collection_name)
+        except Exception as e:
+            raise e
+        finally:
+            return None
 
     def get_server_info(self) -> Any:
         assert self.root_client is not None, 'Connect to client instance first'
@@ -104,7 +121,15 @@ class MongoBroker(RootMongo):
         pass
 
     def mongo_insert_many(self, big_dump: list, col_name: str = None) -> None:
-        # assert big_dump is List, 'Insert Many Requires Array/List data structure'
+        """
+        MongoEquivalent -> db.collection.insertMany()
+        Better suited for textDox inserts when structuring is of lesser importance.
+
+        :param big_dump: list: Array of valid documents.
+        :param col_name: str: Optional[collection_name]
+        :return: None
+        """
+        assert big_dump is list, 'Insert Many Requires Array/List data structure'
         self.set_collection(collection_name=col_name)
         with self._locker:
             try:
@@ -113,11 +138,14 @@ class MongoBroker(RootMongo):
                 logging.warning(f'needType(List[Dox, ...]) -> gotType({type(big_dump)})')
             except OverflowError:
                 logging.warning('Implement insert many fallback handler')
-                raise
+            except Exception as e:
+                raise e
 
-    def mongo_insert_one(self, one_dox, col_name: str = None):
+    def mongo_insert_one(self, one_dox: dict, col_name: str = None):
         """
-        Insert single document -> db.collection
+        MongoEquivalent -> db.collection.insertOne()
+        Inserts single document to the active db.collection.instance.
+
         :param one_dox: type['dict', 'mutable.mapping', 'bson.RAW.doc']
         :param col_name: str = db.collection.name
         :return:
@@ -130,11 +158,12 @@ class MongoBroker(RootMongo):
             except NotImplementedError:
                 self.working_col.insert_one(one_dox)
 
-    def mongo_replace_one(self, one_dox, col_name: str = None):
+    def mongo_replace_one(self, one_dox: dict, col_name: str = None):
         """
+        MongoEquivalent -> db.collection.replaceOne()
         Replaces whole documents, if document doesnt exist insert is performed
-        :param one_dox:
-        :param col_name:
+        :param one_dox: dict: document to find and replace, upsert if !exist
+        :param col_name: str
         :return:
         """
         assert self.working_db is not None, 'Need active db instance to reference'
@@ -150,9 +179,10 @@ class MongoBroker(RootMongo):
 
     def mongo_query(self, user_defined: dict = None, projection: dict = None) -> Any:
         """
-        Called first to check if document is in database
+        MongoEquivalent -> db.collection.find()
+
         :param user_defined: Query filter as per MongoDB documentation specifications
-        :return: TODO Determine this
+        :return: List[obj(documents_matched_filter), ...]
         """
         assert self.working_col is not None, 'Need activeCollection to query'
         with self._locker:
@@ -168,7 +198,7 @@ class MongoBroker(RootMongo):
 
     def mongo_drop_database(self, drop_db: Any = None, check: bool = False) -> None:
         """
-        MongoClient.db.drop()
+        MongoEquivalent -> MongoClient.db.drop()
 
         :param drop_db: accepts: [client.database, database.name]
         :param check: Must pass check=True to execute db.drop()
@@ -181,12 +211,11 @@ class MongoBroker(RootMongo):
         elif isinstance(drop_db, (Database, str)):
             self.root_client.drop_database(name_or_database=drop_db)
         else:
-            # TODO Make db.drop() && db.col.drop() raise ValueError() -> !TypeError
             raise TypeError('NoLive.db:(name/obj): PRESET|PASSED by caller')
 
     def mongo_drop_collection(self, drop_col: Any = None, check: bool = False) -> None:
         """
-        MongoClient.db.collection.drop()
+        MongoEquivalent -> db.collection.drop()
 
         :param drop_col: accepts: [db.collection, collection.name]
         :param check: Must pass check=True to execute db.collection.drop()
@@ -203,7 +232,9 @@ class MongoBroker(RootMongo):
 
     def kill_client(self) -> None:
         """
+        MongoEquivalent -> TODO WhatCommand: MongoClient.terminate/close?
         Safely terminate/close MongoDB socket connection. *(Instance reused if started again)
+
         :return: None
         """
         assert self.root_client is not None, 'MongoClient socket must be open before closing'

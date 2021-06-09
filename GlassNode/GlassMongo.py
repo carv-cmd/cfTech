@@ -75,7 +75,8 @@ class GlassHelper(Glassnodes):
         if search is not None:
             _match = list(filter(lambda x: x[0] in search, _match))
         if initialize is not None:
-            _match[0].append(initialize)
+            for mx in _match:
+                mx.append(initialize)
         return _match
 
 
@@ -84,6 +85,9 @@ class GlassMongoAPI(GlassHelper, Glassnodes):
     def __init__(self):
         super(GlassMongoAPI, self).__init__()
         self._pandas_queue = Queue()
+
+    def update_collection(self):
+        pass
 
     def glass_pandas(self):
         pandas.set_option('display.width', 120)
@@ -177,7 +181,8 @@ if __name__ == '__main__':
         search=['indicators'],
         initialize={'a': a, 'i': r}
     )
-    gapi.glass_mongo(yeet[:25])
+    # pprint(yeet, width=120)
+    gapi.glass_mongo(yeet[20:25])
 
     # foobats = yeet[:25]
     # foobats[0].append({'a': "BTC", 'i': "24h"})
