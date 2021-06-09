@@ -3,7 +3,7 @@ from pymongo.database import Database
 from pymongo.collection import Collection
 from pymongo.errors import ConnectionFailure
 from typing import Any, Optional, Dict, Tuple, List
-from threading import Thread, Event, RLock
+from threading import Thread, RLock
 
 from MongoDatabase.monLoggers import logging
 logging.basicConfig(level=logging.INFO, format='(%(threadName)-9s) %(message)s')
@@ -17,7 +17,6 @@ __all__ = [
     'List',
     'Thread',
     'RLock',
-    'Event',
     'MongoBroker'
 ]
 
@@ -37,12 +36,13 @@ class RootMongo:
         self.root_client = client
         self.working_db = database
         self.working_col = collection
-        if client_ip and start:
-            self.start_client(ip=client_ip)
-        if db_name and start:
-            self.set_database(database_name=db_name)
-        if coll_name and start:
-            self.set_collection(collection_name=coll_name)
+        if start:
+            if client_ip:
+                self.start_client(ip=client_ip)
+            if db_name:
+                self.set_database(database_name=db_name)
+            if coll_name:
+                self.set_collection(collection_name=coll_name)
 
     @classmethod
     def start_mongo_client(cls, host: str = '127.0.0.1:27017', db: str = None, collect: str = None):
@@ -157,7 +157,7 @@ class MongoBroker(RootMongo):
         assert self.working_col is not None, 'Need activeCollection to query'
         with self._locker:
             if user_defined:
-                _cursor = self.working_col.find(user_defined, projection)
+                _cursor = self.working_col.find(user_defined, projection=projection)
             else:
                 _cursor = self.working_col.find()
             return self.fallback_decoder(list(_cursor)[0])
@@ -192,8 +192,8 @@ class MongoBroker(RootMongo):
         :param check: Must pass check=True to execute db.collection.drop()
         :return: None
         """
-        assert self.working_db is not None, 'Need valid db.instance to reference'
         assert check is True, f'Invalid: [check_is_True -> {check}]'
+        assert self.working_db is not None, 'Need valid db.instance to reference'
         if not drop_col:
             self.working_db.drop_collection(name_or_collection=self.working_col)
         elif isinstance(drop_col, (Collection, str)):
@@ -220,7 +220,7 @@ class MongoBroker(RootMongo):
 
 
 if __name__ == '__main__':
-    (hosted, dbm, colt) = ('127.0.0.1:27017', 'Glassnodes', 'GlassPoints')
+    (hosted, dbm, colt) = ('127.0.0.1:27017', 'Glassnodes', 'BTC_24H')
     mons = MongoBroker.start_mongo_client(host=hosted, db=dbm, collect=colt)
     mons.mongo_drop_collection(check=True)
     mons.kill_client()

@@ -17,7 +17,7 @@ class CommandLogger(CommandListener):
     def succeeded(self, event):
         logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
                      "-> SUCCESS{0.connection_id}"
-                     ":[<{0.duration_micros}>:microseconds]\n".format(event))
+                     ":[<{0.duration_micros}>:microseconds]".format(event))
 
     def failed(self, event):
         logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
