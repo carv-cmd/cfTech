@@ -1,0 +1,26 @@
+name: finTechEnv
+channels:
+  - conda-forge
+  - r
+  - defaults
+dependencies:
+  - python=3.8
+  - pip
+  - pymongo
+  - numpy
+  - pandas
+  - requests
+  - websocket-client
+  - gevent
+  - gevent[recommended]
+  - numba
+  - bottleneck
+  - numexpr
+  - dask
+  - intel-openmp
+  - pytz
+  - iso8601
+  - ciso8601
+  - statsmodels
+  - matplotlib
+  - mplfinance
