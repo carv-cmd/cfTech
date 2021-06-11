@@ -1,11 +1,13 @@
+# import signal
+from typing import Any, Optional, Dict, Tuple, List
+
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
 from pymongo.errors import ConnectionFailure
-from typing import Any, Optional, Dict, Tuple, List
-from threading import Thread, RLock
 
 from MongoDatabase.monLoggers import logging
+
 logging.basicConfig(level=logging.INFO, format='(%(threadName)-9s) %(message)s')
 
 __all__ = [
@@ -15,13 +17,11 @@ __all__ = [
     'Dict',
     'Tuple',
     'List',
-    'Thread',
-    'RLock',
     'MongoBroker'
 ]
 
 
-class RootMongo:
+class _RootMongo:
     __slots__ = ('_locker', 'root_client', 'working_db', 'working_col')
 
     def __init__(self,
@@ -32,7 +32,6 @@ class RootMongo:
                  client: MongoClient = None,
                  database: Database = None,
                  collection: Collection = None):
-        self._locker = RLock()
         self.root_client = client
         self.working_db = database
         self.working_col = collection
@@ -50,15 +49,14 @@ class RootMongo:
 
     def start_client(self, ip: str = '127.0.0.1:27017') -> None:
         assert self.root_client is None, 'MonClient instance should be closed before opening'
-        with self._locker:
-            _initialze_client = MongoClient(host=ip)
-            try:
-                _initialze_client.admin.command('ismaster')
-            except ConnectionFailure:
-                logging.warning("Server not available. . .")
-                raise
-            finally:
-                self.root_client = _initialze_client
+        _initialze_client = MongoClient(host=ip)
+        try:
+            _initialze_client.admin.command('ismaster')
+        except ConnectionFailure:
+            logging.warning("Server not available. . .")
+            raise
+        finally:
+            self.root_client = _initialze_client
 
     def set_database(self, database_name: str) -> None:
         """
@@ -115,7 +113,7 @@ class RootMongo:
         return self.working_db.list_collection_names()
 
 
-class MongoBroker(RootMongo):
+class MongoBroker(_RootMongo):
 
     def mongo_bulk_write(self):
         pass
@@ -129,19 +127,18 @@ class MongoBroker(RootMongo):
         :param col_name: str: Optional[collection_name]
         :return: None
         """
-        assert big_dump is list, 'Insert Many Requires Array/List data structure'
+        assert isinstance(big_dump, list), 'Insert Many Requires Array/List data structure'
         self.set_collection(collection_name=col_name)
-        with self._locker:
-            try:
-                self.working_col.insert_many(big_dump)
-            except TypeError:
-                logging.warning(f'needType(List[Dox, ...]) -> gotType({type(big_dump)})')
-            except OverflowError:
-                logging.warning('Implement insert many fallback handler')
-            except Exception as e:
-                raise e
+        try:
+            self.working_col.insert_many(big_dump)
+        except TypeError:
+            logging.warning(f'needType(List[Dox, ...]) -> gotType({type(big_dump)})')
+        except OverflowError:
+            logging.warning('Implement insert many fallback handler')
+        except Exception as e:
+            raise e
 
-    def mongo_insert_one(self, one_dox: dict, col_name: str = None):
+    def mongo_insert_one(self, one_dox, col_name: str = None):
         """
         MongoEquivalent -> db.collection.insertOne()
         Inserts single document to the active db.collection.instance.
@@ -152,11 +149,13 @@ class MongoBroker(RootMongo):
         """
         assert self.working_db is not None, 'Need active db instance to reference'
         self.set_collection(col_name)
-        with self._locker:
-            try:
-                self.working_col.insert_one(self.fallback_encoder(one_dox))
-            except NotImplementedError:
-                self.working_col.insert_one(one_dox)
+        try:
+            self.working_col.insert_one(self.fallback_encoder(one_dox))
+        except NotImplementedError:
+            self.working_col.insert_one(one_dox)
+        except Exception as e:
+            logging.warning(f'Unexpected Error Handled Silently: {one_dox[1]}')
+            raise e
 
     def mongo_replace_one(self, one_dox: dict, col_name: str = None):
         """
@@ -168,14 +167,14 @@ class MongoBroker(RootMongo):
         """
         assert self.working_db is not None, 'Need active db instance to reference'
         self.set_collection(col_name)
-        with self._locker:
-            try:
-                self.working_col.replace_one(
-                    filter={'_metrics': {'$eq': one_dox[1]}},
-                    replacement=self.fallback_encoder(one_dox),
-                    upsert=True)
-            except Exception as e:
-                raise e
+        try:
+            self.working_col.replace_one(
+                filter={'_metrics': {'$eq': one_dox[1]}},
+                replacement=self.fallback_encoder(one_dox),
+                upsert=True)
+        except Exception as e:
+            # raise e
+            pass
 
     def mongo_query(self, user_defined: dict = None, projection: dict = None) -> Any:
         """
@@ -185,12 +184,11 @@ class MongoBroker(RootMongo):
         :return: List[obj(documents_matched_filter), ...]
         """
         assert self.working_col is not None, 'Need activeCollection to query'
-        with self._locker:
-            if user_defined:
-                _cursor = self.working_col.find(user_defined, projection=projection)
-            else:
-                _cursor = self.working_col.find()
-            return self.fallback_decoder(list(_cursor)[0])
+        if user_defined:
+            _cursor = self.working_col.find(user_defined, projection=projection)
+        else:
+            _cursor = self.working_col.find()
+        return self.fallback_decoder(list(_cursor)[0])
 
     def mongo_update(self):
         """ TODO Implement updateOperators """
@@ -255,19 +253,3 @@ if __name__ == '__main__':
     mons = MongoBroker.start_mongo_client(host=hosted, db=dbm, collect=colt)
     mons.mongo_drop_collection(check=True)
     mons.kill_client()
-
-
-########################################################
-# JSON Document Validation
-########################################################
-# def validate_longs(data):
-#     longer = LongHandler()
-#     bats = longer.clean_writer(data)
-#     print(f"\n* Encoded(py -> mongo):\n\t>>> {bats['_DATA_']['_divModified'][0]}")
-#     jesus = longer.clean_reader(bats)
-#     print(f"\n* Decoded(mongo -> py):\n\t>>> {jesus['_DATA_']['_divModified'][0]}")
-
-
-# def quick_wizard(queries):
-#     _glassed = _GlassClient()
-#     return _glassed.glass_quest(index=queries[0], endpoint=queries[1], **queries[2])

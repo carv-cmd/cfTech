@@ -10,6 +10,12 @@ dependencies:
   - numpy
   - pandas
   - requests
+  - grequests
+  - requests-futures
+  - requests-threads
+  - aiohttp
+  - aiodns
+  - cchardet
   - websocket-client
   - gevent
   - gevent[recommended]

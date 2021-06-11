@@ -1,4 +1,5 @@
 import logging
+
 from pymongo.monitoring import CommandListener
 from pymongo.monitoring import ServerListener
 from pymongo.monitoring import ServerHeartbeatListener
