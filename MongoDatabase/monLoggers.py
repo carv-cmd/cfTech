@@ -11,22 +11,24 @@ __all__ = ['logging']
 
 
 class CommandLogger(CommandListener):
+
     def started(self, event):
-        logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
+        logging.info("* CMD(<{0.command_name}>, _requestID[{0.request_id}]) "
                      "-> START{0.connection_id}".format(event))
 
     def succeeded(self, event):
-        logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
+        logging.info("* CMD(<{0.command_name}>, _requestID[{0.request_id}]) "
                      "-> SUCCESS{0.connection_id}"
                      ":[<{0.duration_micros}>:microseconds]".format(event))
 
     def failed(self, event):
-        logging.info("* CMD(_{0.command_name}_, _requestID[{0.request_id}]) "
+        logging.info("* CMD(<{0.command_name}>, _requestID[{0.request_id}]) "
                      "-> FAILED{0.connection_id} "
                      "in {0.duration_micros}ms".format(event))
 
 
 class ServerLogger(ServerListener):
+
     def opened(self, event):
         logging.info(">>> Server{0.server_address} "
                      "-> Added to topology('{0.topology_id}')\n".format(event))
@@ -45,6 +47,7 @@ class ServerLogger(ServerListener):
 
 
 class HeartbeatLogger(ServerHeartbeatListener):
+
     def started(self, event):
         logging.info(">>> PING sent to server {0.connection_id}".format(event))
 
@@ -58,6 +61,7 @@ class HeartbeatLogger(ServerHeartbeatListener):
 
 
 class TopologyLogger(TopologyListener):
+
     def opened(self, event):
         logging.info(">>> Topology(id='{0.topology_id}') -> Opened".format(event))
 
@@ -79,6 +83,7 @@ class TopologyLogger(TopologyListener):
 
 
 class ConnectionPoolLogger(ConnectionPoolListener):
+
     def pool_created(self, event):
         logging.info(">>> [Pool: {0.address}] Created".format(event))
 
@@ -118,6 +123,6 @@ class ConnectionPoolLogger(ConnectionPoolListener):
 
 register(ServerLogger())
 register(CommandLogger())
-# register(TopologyLogger())
+register(TopologyLogger())
 # register(HeartbeatLogger())
 # register(ConnectionPoolLogger())
