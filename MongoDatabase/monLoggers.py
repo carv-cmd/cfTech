@@ -5,9 +5,9 @@ from pymongo.monitoring import ServerListener
 from pymongo.monitoring import ServerHeartbeatListener
 from pymongo.monitoring import TopologyListener
 from pymongo.monitoring import ConnectionPoolListener
-from pymongo.monitoring import register
 
-__all__ = ['logging']
+
+__all__ = ['logging', 'event_listeners']
 
 
 class CommandLogger(CommandListener):
@@ -85,44 +85,54 @@ class TopologyLogger(TopologyListener):
 class ConnectionPoolLogger(ConnectionPoolListener):
 
     def pool_created(self, event):
-        logging.info(">>> [Pool: {0.address}] Created".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Created ]".format(event))
 
     def pool_cleared(self, event):
-        logging.info(">>> [Pool: {0.address}] Cleared".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Cleared ]".format(event))
 
     def pool_closed(self, event):
-        logging.info(">>> [Pool: {0.address}] Closed".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Closed ]".format(event))
 
     def connection_created(self, event):
-        logging.info(">>> [Pool: {0.address}]|[Conn: #{0.connection_id}] "
-                     "-> Connection Created".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Conn(<{0.connection_id}>) "
+                     "| Connection Created".format(event))
 
     def connection_ready(self, event):
-        logging.info(">>> [Pool: {0.address}]|[Conn: #{0.connection_id}] "
-                     "-> Connection Successfully Initialized".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Conn(<{0.connection_id}>) "
+                     "| Successfully Initialized ]".format(event))
 
     def connection_closed(self, event):
-        logging.info(">>> [Pool: {0.address}]|[Conn: #{0.connection_id}] "
-                     "-> ConnectionClose.reason -> {0.reason}".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Conn(<{0.connection_id}>) "
+                     "| ConnCloseReason -> {0.reason}".format(event))
 
     def connection_check_out_started(self, event):
-        logging.info(">>> [Pool: {0.address}] Connection Check Out Started".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Check Out Started ]".format(event))
 
     def connection_check_out_failed(self, event):
-        logging.info(">>> [Pool: {0.address}] Connection Check Out Failed "
-                     "-> Reason -> {0.reason}".format(event))
+        logging.info(">>> [ <pool> | {0.address} | ChkOutFail.reason -> {0.reason} ]".format(event))
 
     def connection_checked_out(self, event):
-        logging.info(">>> [Pool: {0.address}]|[Conn: #{0.connection_id}] "
-                     "-> Connection Checked Out of Pool".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Conn(<{0.connection_id}>) "
+                     "| Checked Out of Pool ]\n".format(event))
 
     def connection_checked_in(self, event):
-        logging.info(">>> [Pool: {0.address}]|[Conn: #{0.connection_id}] "
-                     "-> Connection Checked Out of Pool".format(event))
+        logging.info(">>> [ <pool> | {0.address} | Conn(<{0.connection_id}>) "
+                     "| Checked into Pool ]".format(event))
 
 
-register(ServerLogger())
-register(CommandLogger())
-register(TopologyLogger())
-# register(HeartbeatLogger())
-# register(ConnectionPoolLogger())
+event_listeners = [
+        ServerLogger(),
+        CommandLogger(),
+        TopologyLogger(),
+        # HeartbeatLogger(),
+        ConnectionPoolLogger()
+    ]
+
+
+if __name__ == '__main__':
+    # print(help())
+    pass
+
+else:
+    pass
+

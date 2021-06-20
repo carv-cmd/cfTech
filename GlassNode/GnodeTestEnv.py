@@ -1,68 +1,58 @@
-# from gevent import monkey; monkey.patch_all()
-# from gevent import monkey; monkey.patch_queue(), monkey.patch_thread()
-# from threading import Timer
-import os
-
-import time
-from datetime import datetime
+import logging
 import asyncio
-from aiohttp import ClientSession
-import ciso8601
-from requests import get
-import tracemalloc
-from dotenv import load_dotenv, find_dotenv
+from datetime import datetime
+from collections import defaultdict
+from typing import Any, Dict, Tuple, List
 
-from bson.json_util import loads
-from MongoDatabase.Mongos import Any, Optional, Dict, Tuple, List
-from MongoDatabase.Mongos import logging
+from ciso8601 import parse_datetime, parse_rfc3339
+
 from MongoDatabase.Mongos import MongoBroker
-
-load_dotenv(find_dotenv())
-
-__all__ = [
-    'LongHandler',
-    'ciso8601',
-    'datetime',
-    'logging',
-    'Optional',
-    'Tuple',
-    'Dict',
-    'List',
-    'Any'
-]
-
-tracemalloc.start()
+from EASYapi.RESTapi import AioHttpREST
 
 
-class LongHandler:
-    _MET, _PAR, _LAST, _DATA = 'Metric', 'Parameters', 'Updated', 'Data'
-    _DIVS, _LK, _MODIFY = 'DivMask', 'DivKeys', 'DivModified'
+__all__ = ['MongoHandler', 'GlassPoints', 'GlassAIO']
+
+
+class MongoHandler(MongoBroker):
+
+    _DOX_SCHEMA = ('Metric', 'Parameters', 'Updated', 'Data')
+    _TUPLE_SIG = ('TuplePath', 'Signature')
+    _DIV_KEYS = ('DivMask', 'DivKeys', 'DivModified')
     _OVERFLOW = 9223372036854774783
     _MASK = 4294967296
+    _ENCODE_SCHEMA = [_MASK, *_DIV_KEYS]
+
+    def __init__(self, start=True, ip='127.0.0.1:27017', db='Glassnodes'):
+        super(MongoHandler, self).__init__(start=start, mon_ip=ip, db_name=db)
+
+    @staticmethod
+    def iso_local_utc() -> datetime:
+        """
+        Local update timestamp in <UTC> context.
+        LocalOffset == -4hours.
+        Update_Orchestrator_Ref_Point: document['Updated'].utc_offset(-4hours)
+        :return: datetime.datetime local obj in <UTC> context
+        """
+        # TODO UTC-4 offset conversion codec
+        return datetime.utcnow().replace(second=0, microsecond=0)
 
     @staticmethod
     def ciso_handler(ts: Any = None):
         """ _UTC_OFFSET = divmod(divmod(time.localtime().tm_gmtoff, 60)[0], 60)[0] """
         try:
-            return ciso8601.parse_datetime(ts).timestamp()
+            return parse_datetime(ts).timestamp()
         except ValueError:
             return datetime.utcfromtimestamp(ts).timestamp()
         except TypeError:
             return ts
 
     @staticmethod
-    def _just_time(_decoded):
-        for xyz in _decoded:
-            xyz['t'] = ciso8601.parse_rfc3339(xyz['t'])
-        return _decoded
-
-    @staticmethod
-    def _fallback_encoder(_long_ki, _latter_ki, _decoded, _mask=_MASK, _d=_DIVS, _k=_LK, _m=_MODIFY) -> Dict:
+    def _fallback_encoder(_longs, _latters, _decoded, _mask, _d, _k, _m) -> Dict:
         """
         Work around for MongoDB 8-byte int limit that retains int accuracy at its full resolution
 
-        :param _long_ki: keys flagged for overflow values
-        :param _latter_ki: from -> {'v': Var[str, int, float], 'o': Dict(Any)}
+        :param _longs: keys flagged for overflow values
+        :param _latters: from -> {'v': Var[str, int, float], 'o': Dict(Any)}
         :param _decoded: JSON document flagged(int > MongoDB.8byte.limit)
         :param _mask: class_attr: see default
         :param _d: class_attr: see default
@@ -71,16 +61,14 @@ class LongHandler:
 
         :return: {_d: _mask, _k: _long_keys, _m: _decoded}
         """
-        _start = datetime.now()
         for _item in _decoded:
-            _item['t'] = ciso8601.parse_rfc3339(_item['t'])
+            _item['t'] = parse_rfc3339(_item['t'])
             try:
-                for failed in _long_ki:
-                    _item[_latter_ki][failed] = divmod(_item[_latter_ki][failed], _mask)
+                for failed in _longs:
+                    _item[_latters][failed] = divmod(_item[_latters][failed], _mask)
             except TypeError:
-                _item[_latter_ki] = divmod(_item[_latter_ki], _mask)
-        logging.info(f'-> ENCODING.TIME(<{(datetime.now() - _start).total_seconds()}>) -> {_long_ki}\n')
-        return {_d: _mask, _k: _long_ki, _m: _decoded}
+                _item[_latters] = divmod(_item[_latters], _mask)
+        return {_d: _mask, _k: _longs, _m: _decoded}
 
     @staticmethod
     def _fallback_decoder(_long_ki, _latter_ki, _encoded, _mask) -> Dict:
@@ -96,58 +84,54 @@ class LongHandler:
         logging.info(f'-> DECODING.TIME(<{(datetime.now() - _start).total_seconds()}>) -> {_long_ki}\n')
         return _encoded
 
-    def fallback_encoder(self, _json_decoded, _max_int64=_OVERFLOW) -> Dict:
+    def fallback_encoder(self, _updated_at, _decoded, _max_int64=_OVERFLOW) -> Dict:
         """
         Scans len(1/10) for overflow conditions, if none return basic local formatting.
         If conditional; use divmod w/ class.attr mask saved in _data dictionary if ever needed.
         Consider long term growth of int > max_int64; set mask accordingly to avoid future reformatting.
         Current _MASK value is ideal for most conditions; stability is not guaranteed if changed.
 
-        :param _json_decoded: Raw json response format from GlassnodeAPI
+        :param _decoded: Raw json response format from GlassMongoAPI
         :param _max_int64: Safe max integer size to store in MongoDB
         :return: {_metrics: dict, _parameters: dict, _process: encoded_response}
         """
-        _params, _process = _json_decoded[1], _json_decoded[2]
-        _super_key = ('v' if 'v' in _process[0] else 'o')
-        _scan_skip = len(_process) // 10
-        _fix = []
-        for _index in range(0, len(_process), _scan_skip):
+        _start = datetime.now()
+        (_metric, _param, _process) = (_decoded[0], _decoded[1], _decoded[2])
+        _set_len, _nest_key = (len(_process), ('v' if 'v' in _process[0] else 'o'))
+        _overflow = []
+        for _index in range(0, _set_len, _set_len // 10):
             try:
-                _fix = [k for k, v in _process[_index][_super_key].items() if v > _max_int64]
+                _overflow = [k for k, v in _process[_index][_nest_key].items() if v > _max_int64]
             except AttributeError:
-                if _process[_index][_super_key] > _max_int64:
-                    _fix = _process[_index][_super_key]
+                if _process[_index][_nest_key] > _max_int64:
+                    _fix = _process[_index][_nest_key]
                 break
-        if _fix:
-            _process = self._fallback_encoder(_long_ki=_fix, _latter_ki=_super_key, _decoded=_process)
-        else:
+        if not _overflow:
             for xyz in _process:
-                xyz['t'] = ciso8601.parse_rfc3339(xyz['t'])
-        return {
-            self._MET: _json_decoded[0],
-            self._PAR: {'IdxEndpt': _params[0], 'Signature': _params[1]},
-            self._LAST: datetime.now(),
-            self._DATA: _process
-        }
+                xyz['t'] = parse_rfc3339(xyz['t'])
+        else:
+            _encode_tuple = (_overflow, _nest_key, _process, *self._ENCODE_SCHEMA)
+            _process = self._fallback_encoder(*_encode_tuple)
+        _parameters = dict(zip(self._TUPLE_SIG, [*_param]))
+        logging.info(f'-> ENCODING.TIME(<{(datetime.now() - _start).total_seconds()}>) -> {_metric}')
+        return dict(zip(self._DOX_SCHEMA, [_metric, _parameters, _updated_at, _process]))
 
-    def fallback_decoder(self, _json_encoded, _d=_DIVS, _k=_LK, _m=_MODIFY) -> Dict:
+    def fallback_decoder(self, _json_encoded) -> Dict:
         """
-        Decodes divmod.hakd datasets. See encoder for reasoning why.
 
-        :param _json_encoded: dict: local_encoding_JSON
-        :param _d: class_attr: default('_divMask', divmod.divisor)
-        :param _k: class_attr: default('_divKeys', overFlow.keys)
-        :param _m: class_attr: default('_divModified', modified.data)
-
-        :return: Dict[(str: metric), (dict: parameters), (dict: data)]
+        :param _json_encoded:
+        :return:
         """
         try:
-            _encoded = _json_encoded[self._DATA]
+            _data_key = self._DOX_SCHEMA[-1:][0]
+            _div_num, _div_key, _div_modified = self._DIV_KEYS
+            _encoded = _json_encoded[_data_key]
+            _nested = ('v' if 'v' in _encoded[_div_modified][0] else 'o')
             _decoded = self._fallback_decoder(
-                _long_ki=_encoded[_k],
-                _latter_ki=('v' if 'v' in _encoded[_m][0] else 'o'),
-                _encoded=_encoded[_m],
-                _mask=_encoded[_d]
+                _long_ki=_encoded[_div_key],        # DivKeys.class_key
+                _latter_ki=_nested,                 # is (single|multi) part response?
+                _encoded=_encoded[_div_modified],   # DivModified.class_key
+                _mask=_encoded[_div_num]            # DivMask.class_key
             )
         except TypeError:
             _decoded = _json_encoded
@@ -156,181 +140,179 @@ class LongHandler:
         return _decoded
 
 
-class _GlassPoints(LongHandler, MongoBroker):
-    _API_KEY = {'api_key': os.getenv('GLASSNODE')}
+class GlassPoints(AioHttpREST, MongoHandler):
 
-    # If root paths are updated by vendor change class variables below
-    _NODE = "https://api.glassnode.com/v1/metrics"
-    _HELPER = "https://api.glassnode.com/v2/metrics/endpoints"
+    # __slots__ = ('_in_memory', '_process_raw', '_bad_requests')
 
-    def __init__(self, start=True, ip='127.0.0.1:27017', db='Glassnodes'):
-        super(_GlassPoints, self).__init__(start=start, client_ip=ip, db_name=db)
-
-    @staticmethod
-    def set_params(a=None, s=None, u=None, i=None, f=None, c=None, e=None, timestamp_format=None):
-        raise NotImplementedError()
-
-    @staticmethod
-    def _divide_requests(_gator):
-        (_double_gator, _gator_length, _safe_gator) = (_gator.copy(), len(_gator), 25)
-        _request_lim, _null = divmod(_gator_length, _safe_gator)
-        _cut_gator = [[_gator.pop() for _r1 in range(_safe_gator)] for _ in range(_request_lim)]
-        _cut_gator.append(_gator)
-        return _cut_gator
-
-    def _load_endpoints(self, spec: Dict = None, projector: Dict = None, updates: bool = None) -> List:
-        """
-        :param spec: ex. { $and: [{"tier": 1}, {"assets.symbol": {"$eq": 'BTC'}}]}
-        :param updates: if true, db.GlassPoints.drop, db.GlassPoints.insert(request); else db.loader
-        :return: List[Dicts[endpoint_data]]
-        """
-        if updates:
-            self.mongo_drop_collection('GlassPoints', check=updates)
-            with get(self._HELPER, params=self._API_KEY) as quick_help:
-                _refreshed = quick_help.json()
-            for eps in _refreshed:
-                eps['path'] = eps['path'].split('/')[-2:]
-            self.mongo_insert_many(big_dump=_refreshed, col_name='GlassPoints')
-        try:
-            self.set_collection(collection_name='GlassPoints')
-            _finder = list(self.working_col.find(spec, projection={**self._ID_IGNORE, **projector}))
-        except Exception as e:
-            logging.warning(f'* Raised: {e}')
-            _finder = list(self.working_col.find(projection=self._ID_IGNORE))
-        return _finder
-
-    def load_endpoints(self, tier: str, asset: str, currencies: str, resolutions: str,
-                       formats: str, update: bool, query_proj: dict = None) -> List:
-        _endpoint_query = {
-            "$and": [
-                {"tier": {"$in": [int(n) for n in tier.split('/')]}},
-                {"assets.symbol": {"$in": asset.upper().split('/')}},
-                {'currencies': {"$in": currencies.upper().split('/')}},
-                {"resolutions": {"$in": resolutions.split('/')}},
-                {"formats": {"$in": formats.upper().split('/')}}
-            ]
-        }
-        if query_proj is None:
-            _project_all = ['tier', 'assets', 'currencies', 'resolutions', 'formats']
-            query_proj = dict(map(lambda x: (x, False), _project_all))
-        _projected = self._load_endpoints(
-            spec=_endpoint_query,
-            projector={**self._ID_IGNORE, **query_proj},
-            updates=update
-        )
-        return [elem['path'] for elem in _projected]
-
-    def quick_query(
-        self,
-        tier: str = '1/2/3',
-        asset: str = 'BTC',
-        currencies: str = 'NATIVE/USD',
-        resolutions: str = "10m/1h/24h/1w/1month",
-        formats: str = 'JSON/CSV',
-        *,
-        update: bool = None,
-        specify: list = None,
-        prep: dict = None
-    ):
-        """
-        Query Glassnode indices/endpoints for available options.
-        Any grouped function parameters should be separated by '/' symbol for safe split.
-
-        :param tier: str = '1/2/3'
-        :param asset: str = 'BTC/ETH'
-        :param currencies: str = 'NATIVE/USD'
-        :param resolutions: str = '10m/1h/24h/1w/1month'
-        :param formats: str = 'JSON/CSV'
-        :param update: bool = 'True' to update stored endpoints
-        :param specify: list = available glassnode indices to return
-        :param : dict = pass to prep glass_quest signature in one call (applies-like-params)
-        :return: Given query filter returns all endpoints matching either semi/fully prepped
-        """
-        _locals_copy = locals().copy().items()
-        _ignore_locals = ['self', 'specify', 'prep']
-        _res = self.load_endpoints(**dict(filter(lambda x: x[0] not in _ignore_locals, _locals_copy)))
-        if specify is not None:
-            _res = list(filter(lambda x: x[0] in specify, _res))
-        if prep is not None:
-            prep = self.set_params(**prep)
-            _res = [(*mx, prep) for mx in _res]
-        if len(_res) > 25:
-            logging.info(f'* len(Gators).quick_query() -> {len(_res)}')
-            _res = self._divide_requests(_res)
-        return _res
-
-
-class GlassnodeAPI(_GlassPoints):
-    # _ANNOYING = {'CONTENT-TYPE': 'application/json'}
-    _PASSING = ['_id', 'Parameters', 'Updated', 'Data']
-    __slots__ = ('_sesh', '_in_memory', '_process_raw', '_working_datasets', '_bad_requests')
+    _ROOT_METRICS = "https://api.glassnode.com/v2"  # -> metricsEndpoint
+    _DENIED = ['Signature', 'Params', 'StatusHeader']  # -> write_requester.method
+    _GET_DOX = ('Signature', 'Parameters', 'TuplePath')  # -> dox_on_disk/
+    _API_KEY = 'GLASSNODE'
 
     def __init__(self):
-        super(GlassnodeAPI, self).__init__()
-        self._sesh = ClientSession
-        self._in_memory = []
+        super(GlassPoints, self).__init__()
+        self._in_memory = defaultdict(list)
         self._process_raw = []
-        self._working_sets = []
         self._bad_requests = []
 
-    def _batch_metrics(self, preps):
-        async def _aio(target, params):
-            async with self._sesh() as session:
-                async with session.get(target, params=params) as resp:
-                    _initial = f"(<{resp.status}:{resp.reason}>)"
-                    logging.info(f"* Request{_initial}:?{target}")
-                    if resp.status != 200:
-                        resp = {'Response': dict(resp.headers), 'Status': _initial, 'URL': str(resp.url)}
-                    else:
-                        resp = await resp.text()
-                    return resp
-        _path, _parameters = self._NODE, {**preps[0][1], **self._API_KEY}
-        _ev_loop = asyncio.get_event_loop()
-        _coroutines = [_aio(f'{_path}/{_ep[0]}/{_ep[1]}', _parameters) for _ep, _dk in preps]
-        return _ev_loop.run_until_complete(asyncio.gather(*_coroutines))
+    def _endpt_updates(self, _updates: bool):
+        self.mongo_drop_collection('GlassPoints', check=_updates)
+        if self.api_key is None:
+            self.api_key = self._API_KEY
+        _base_pts = [("metrics", "endpoints")]
+        self.pooled_aio(endpoints=_base_pts, parameters={}, base_url=self._ROOT_METRICS)
 
-    def write_requests(self, _signed_ray, _collection: str = None):
-        for _sign, _dox in list(_signed_ray):
+    def endpt_query(self, filters):
+        try:
+            _gen_filter = {"$and": []}
+            for _key, _val in filters:
+                _val = _val.upper().split('/')
+                if _key in ['tier']:
+                    _val = [int(n) for n in _val]
+                elif _key in ['assets']:
+                    _key = 'assets.symbol'
+                elif _key in ['resolutions']:
+                    _val = [_v.lower() for _v in _val]
+                _gen_filter["$and"].append({_key: {"$in": _val}})
+        except TypeError:
+            _gen_filter = filters
+        _cox = 'GlassPoints'
+        _projection = {'path': True}
+        _cox = self.mongo_query(_cox, _gen_filter, _projection)
+        return [idx['path'] for idx in _cox]
+
+    def load_endpoints(self, update=None, specify=None, filters=None) -> List:
+        """
+
+        :param update:
+        :param specify:
+        :param filters:
+        :return:
+        """
+        if update:
+            self._endpt_updates(update)
+        _queried = self.endpt_query(filters)
+        try:
+            _queried = list(filter(lambda x: x[0] in specify, _queried))
+        except TypeError:
+            pass
+        return _queried
+
+    def _write_responses(self, _signature: zip, _collection: tuple) -> None:
+        """
+
+        :param _signature: request_signature: [('index', 'endpoint'), ]
+        :param _collection:
+        :return:
+        """
+        _update_ts = self.iso_local_utc()
+        _collection = f'{_collection[0]}_{_collection[1]}'
+        for _sig, _dox in _signature:
             try:
-                assert isinstance(_dox, str)
-                _data_label = f"{'_'.join(_sign[0])}".upper()
-                _one_dox = (_data_label, _sign, loads(_dox))
-                self._process_raw.append(self.fallback_encoder(_one_dox))
-            except AssertionError:
-                _baddie = {'Signature': _sign[0], 'Params': _sign[1], 'StatusHeader': _dox}
-                self._bad_requests.append(_baddie)
-            _len_p, _len_r = len(self._process_raw), len(self._bad_requests)
-            # logging.info(f'* len(Processed, !Request): ({_len_p}, {_len_r})')
-        self.mongo_insert_many(self._process_raw)
-        self.mongo_insert_many(self._bad_requests, col_name='BadRequests')
+                _data_label = '_'.join(_sig[0]).upper()
+                _one_dox = self.fallback_encoder(_update_ts, _decoded=(_data_label, _sig, _dox))
+                self._process_raw.append(_one_dox)
+            except ValueError:
+                _denied = {k: v for k, v in zip(self._DENIED, [*_sig, dict(_dox)])}
+                self._bad_requests.append(dict(_denied))
+        if self._process_raw:
+            self.mongo_insert_many(_collection, self._process_raw)
+            for xyz in self._process_raw:
+                _write_success = xyz[self._GET_DOX[1]][self._GET_DOX[2]]
+                self._in_memory[_collection].append(_write_success)
+            self._process_raw.clear()
 
-    def read_loader(self, formatted: List[Tuple[Any, Dict]]):
-        self.set_collection(f"{formatted[0][2]['a']}_{formatted[0][2]['i']}".upper())
-        _memory = self.working_col.find(projection={_proj: False for _proj in self._PASSING})
-        _on_disk, _no_local = [k['Metric'] for k in list(_memory)], []
-        for _fock in formatted:
-            if '_'.join([_fock[0], _fock[1]]).upper() in _memory:
-                self._in_memory.append(_fock)
+    async def aio_writer(self, write_data: list, grouping: list, params: dict, x_lim_wait: float):
+        _request_signature = [(grouped.split('/')[-2:], params) for grouped in grouping]
+        try:
+            _collection = (params['a'], params['i'])
+            self._write_responses(zip(_request_signature, self.response_array), _collection)
+        except KeyError:
+            logging.warning("DID I CALL UPDATE?")
+            _new_points = self.response_array.pop()
+            for distill in _new_points:
+                distill['path'] = distill['path'].split('/')[-2:]
+            # self.mongo_insert_many('GlassPoints', big_dump=_new_points)
+        self.response_array.clear()
+        logging.info(f'X-Limit.sleep({x_lim_wait})')
+        await asyncio.sleep(x_lim_wait)
+
+
+class GlassAIO(GlassPoints):
+
+    _ROOT_DATA = "https://api.glassnode.com/v1/metrics"  # dataEndpoint
+    _GEN_IGNORE = ['self', 'update', 'specify', 'prepped']  # -> self.glassnodes
+
+    def __init__(self):
+        super(GlassAIO, self).__init__()
+
+    def _log_bad_requests(self, _denied_access: List) -> None:
+        if any(_denied_access):
+            self.mongo_insert_many('BadRequests', big_dump=_denied_access)
+            self._bad_requests.clear()
+
+    def dox_on_disk(self, _collection):
+        """
+        :param _collection: Near future working collection
+        :return: 2 arrays; (known_bad_requests, already_saved)
+        """
+        (_sig, _field, _nest_field) = self._GET_DOX
+        _bad_collection = zip(('Params.a', 'Params.i'), _collection)
+        _filters = {"$and": [{_px: {'$eq': _ax}} for _px, _ax in _bad_collection]}
+        _bad_queries = self.mongo_query('BadRequests', mon_filter=_filters, projector={_sig: True})
+        _good_collection = f'{_collection[0]}_{_collection[1]}'
+        _on_disk = self.mongo_query(_good_collection, projector={_field: 1})
+        return [_bad[_sig][1] for _bad in _bad_queries], \
+               [_good[_field][_nest_field][1] for _good in _on_disk]
+
+    def read_loader(self, formatted: List[Tuple[str, str]], _params: Dict[str, Any]) -> None:
+        """
+
+        :param formatted:
+        :param _params:
+        :return:
+        """
+        _not_local = []
+        _ref_collection = _params['a'], _params['i']
+        _known_fails, _check_disk = self.dox_on_disk(_ref_collection)
+        for _targets in formatted:
+            if _targets[1] in _known_fails:
+                logging.warning(f'// SKIP(Known:BadRequest:4xx): {_targets} //')
+            elif _targets[1] in _check_disk:
+                self._in_memory[_ref_collection].append(tuple(_targets))
             else:
-                _no_local.append(_fock)  # TODO known.BadRequest.ignore()
-        if any(_no_local):
-            _req_signature = [((_eps[0], _eps[1]), _eps[2]) for _eps in _no_local]
-            _document_array = self._batch_metrics(preps=_req_signature)
-            self.write_requests(zip(_req_signature, _document_array))
+                _not_local.append(_targets)
+        if _not_local:
+            self.api_key = self._API_KEY
+            self.pooled_aio(endpoints=_not_local, parameters=_params, base_url=self._ROOT_DATA)
+            self._log_bad_requests(self._bad_requests)
 
-    def glass_lines(self, specify: list = None, parameters: dict = None, updating: bool = False):
-        _sleeper, _testing = 0, 1
-        _sepr = ''.join(['-' for _ in range(80)])
-        _hedgies = self.quick_query(update=updating, specify=specify, prep=parameters)
-        # _hedgies = [_hedgies[0][:4]]
-        pprint(_hedgies[0], width=160, sort_dicts=False)
-        for _degenerates in _hedgies:
-            time.sleep(_sleeper)
-            self.read_loader(_degenerates)
-            _sleeper = 65
+    def glassnodes(
+        self,
+        prepped: dict,
+        update: bool = None,
+        specify: list = None,
+        tier: str = '1/2/3',
+        assets: str = 'BTC',
+        currencies: str = 'NATIVE/USD',
+        resolutions: str = "10m/1h/24h/1w/1month",
+        formats: str = 'JSON'
+    ) -> Dict:
+        _locals_copy = locals().copy().items()
+        _glass_quest = filter(lambda x: x[0] not in self._GEN_IGNORE, _locals_copy)
+        _eps = self.load_endpoints(update, specify, _glass_quest)
+        _prepped = self.set_params(**prepped)
+        self.read_loader(_eps, _prepped)
+        if self._in_memory:
+            return dict(self._in_memory)
+
+    def quick_delete(self, verify=False):
+        _clear_collections = ['BTC_24h', 'BadRequests']
+        for _nuked in _clear_collections:
+            self.mongo_drop_collection(drop_col=_nuked, check=verify)
 
     @staticmethod
-    def set_params(a=None, s=None, u=None, i=None, f=None, c=None, e=None, timestamp_format=None):
+    def set_params(a=None, s=None, u=None, i=None, f=None, c=None, e=None, timestamp_format=None) -> Dict:
         """
         * EXAMPLE START/UNTIL TIMESTAMPS BELOW:
         * All timestamps: [<defined as <UTC> & <refer to interval start>]
@@ -355,42 +337,52 @@ class GlassnodeAPI(_GlassPoints):
         :param c: str = currency(['NATIVE', 'USD'])
         :param e: str = exchange(['aggregated','binance','bittrex','coinex','gate.io','huobi','poloniex'])
         :param timestamp_format: str = ['*humanized(RFC-3339)*', 'UNIX']
+
+        :return: Prepped Parameter Dictionary
         """
         _local_copy = locals().copy().items()
-        _build = dict(filter(lambda bx: bx[1] is not None, _local_copy))
-        for timestamps in [ts for ts in _build if ts in ['s', 'u']]:
-            _build[timestamps] = int(ciso8601.parse_datetime(str(_build[timestamps])).timestamp())
-        return _build
+        _passed = dict(filter(lambda bx: bx[1] is not None, _local_copy))
+        for _iso_8601 in filter(lambda elem: elem[0] in ['s', 'u'], _passed):
+            _passed[_iso_8601] = int(parse_datetime(_passed[_iso_8601]).timestamp())
+        _passed['timestamp_format'] = 'humanized'
+        return _passed
+
+
+def covid_test(_parameters: dict, indices: list, resetting: bool = None):
+    glass_api = GlassAIO()
+    _foobars = glass_api.glassnodes(_parameters, specify=indices)
+    if resetting:
+        glass_api.quick_delete(resetting)
+    glass_api.kill_client()
+    glass_api.terminate_session()
+    return _foobars
 
 
 if __name__ == '__main__':
     from pprint import pprint
-    _ape = GlassnodeAPI()
-    _specific = ['market', 'indicators']
-    _calling = {'a': 'BTC', 'i': '24h', 'f': 'JSON', 'timestamp_format': 'humanized'}
-    _ape.glass_lines(specify=_specific, parameters=_calling)
-    _ape.kill_client()
+    _config = {'a': 'BTC', 'i': '24h', 'f': 'JSON', 'timestamp_format': 'humanized'}
+    query_for = ['fees']
+    covid_test(_config, indices=query_for)
 
-# pymongo.errors.BulkWriteError: batch op errors occurred,
-#   full error: {
-#     'writeErrors': [
-#         {'index': 0,
-#         'code': 11000,
-#         'keyPattern': {'_id': 1},
-#         'keyValue': {'_id': ObjectId('60c599560afdb307e963055c')},
-#         'errmsg': "E11000 duplicate key error collection:
-#             Glassnodes.BTC_24H index:
-#               _id_ dup key: { _id: ObjectId('60c599560afdb307e963055c') }",
 
-# pymongo.errors.BulkWriteError: batch op errors occurred,
-#   full error: {
-#   'writeErrors': [{
-#       'index': 0,
-#       'code': 11000,
-#       'keyPattern': {'_id': 1},
-#       'keyValue': {'_id': ObjectId('60c59df47eb19b055db73dc0')},
-#       'errmsg': "E11000 duplicate key error collection:
-#           Glassnodes.BTC_24H index:
-#               _id_ dup key: { _id: ObjectId('60c59df47eb19b055db73dc0') }",
-#                   'op': {'Metric': 'MARKET_PRICE_REALIZED_USD',
-
+# def batch_metrics(self, preps: List[Tuple[Tuple[Any, Any], dict]]) -> Any:
+    #     """
+    #
+    #     :param preps:
+    #     :return:
+    #     """
+    #     async def _aio(target, params):
+    #         async with self._sesh() as session:
+    #             async with session.get(target, params=params) as resp:
+    #                 _stats = (resp.status, resp.reason, str(resp.url), dict(resp.headers))
+    #                 if _stats[0] != 200:
+    #                     _fields = ['URL', 'Status', 'Header']
+    #                     _no_good = [_stats[2], f"<{_stats[0]}:{_stats[1]}>", _stats[3]]
+    #                     resp = [(*_bad,) for _bad in zip(_fields, _no_good)]
+    #                 else:
+    #                     resp = await resp.json(content_type=None)
+    #                 return resp
+    #     _ev_loop = asyncio.get_event_loop()
+    #     _params = {**preps[0][1], **self._API_KEY}
+    #     _coroutines = [_aio(f'{self._NODE}/{_ep[0]}/{_ep[1]}', _params) for _ep, _dk in preps]
+    #     return _ev_loop.run_until_complete(asyncio.gather(*_coroutines))
