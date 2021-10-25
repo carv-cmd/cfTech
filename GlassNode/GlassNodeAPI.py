@@ -320,7 +320,7 @@ class GlassAIO(GlassHandler):
     def query_requests(self, targeting: List[Tuple[str, str]], _params: Dict[str, Any]) -> None:
         """
 
-        :param targeting:
+        :param targeting: glassnode endpoints
         :param _params:
         :return:
         """
