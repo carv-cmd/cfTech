@@ -166,10 +166,10 @@ if __name__ == '__main__':
 #             del self._bids
 #             del self._asks
 #
-#     def _send_update(self, client: socket.socket):
+#     def _send_update(self, CLIENT: socket.socket):
 #         dump = json.dumps({'updates': {'bids': self._bids, 'asks': self._asks}})
 #         logs.debug(f'* SENT -> {dump}')
-#         client.send(dump.encode('utf-8'))
+#         CLIENT.send(dump.encode('utf-8'))
 #         self._reset_msg()
 #
 #     def _pseudo_update(self, write_lock, read_lock, delay: float = 1.0):
@@ -182,25 +182,25 @@ if __name__ == '__main__':
 #             with read_lock:
 #                 read_lock.wait(timeout=5)
 #
-#     def _get_update(self, write_lock, read_lock, client):
+#     def _get_update(self, write_lock, read_lock, CLIENT):
 #         logs.debug('> _GET_update.initiated. . .\n')
 #         while True:
 #             with write_lock:
 #                 write_lock.wait(timeout=5)
 #             with read_lock:
 #                 try:
-#                     self._send_update(client)
+#                     self._send_update(CLIENT)
 #                     read_lock.notifyAll()
 #                 except ConnectionAbortedError:
 #                     self._terminate_socket()
 #
-#     def _client_handler(self, client: socket.socket):
+#     def _client_handler(self, CLIENT: socket.socket):
 #         write_lock = Condition()
 #         read_lock = Condition()
 #         make = Thread(name='_SETTER_UPDATE', target=self._pseudo_update,
 #                       args=(write_lock, read_lock))
 #         get = Thread(name='_GET_UPDATE', target=self._get_update,
-#                      args=(write_lock, read_lock, client))
+#                      args=(write_lock, read_lock, CLIENT))
 #         make.start()
 #         time.sleep(1)
 #         get.start()
@@ -276,12 +276,12 @@ if __name__ == '__main__':
     #             self._reset_msg()
     #             _read_locks.notifyAll()
 
-    # def _client_handler(self, client: socket.socket):
+    # def _client_handler(self, CLIENT: socket.socket):
     #     logs.debug(f'* _CLIENT_HANDLER.started. . .')
     #     _read = Condition()
     #     _write = Condition()
     #     writes = Thread(name='_SETTER_UPDATE', target=self._set_update, args=(_read, _write))
-    #     reads = Thread(name='_GET_UPDATE', target=self._get_update, args=(_read, _write, client,))
+    #     reads = Thread(name='_GET_UPDATE', target=self._get_update, args=(_read, _write, CLIENT,))
     #     writes.start()
     #     time.sleep(1)
     #     reads.start()

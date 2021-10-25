@@ -42,7 +42,7 @@
 #     :param stream: Type/channel stream -> 'tickers', 'orderbook', etc
 #     :param delay: Time to wait between polling the server.
 #     :param run_event: Event loop object to sync with SystemExit
-#     :return: Continuously writes to file or database.
+#     :return: Continuously writes to file or working_db.
 #     """
 #
 #     valid_name = ''.join(['_' if x in '/' else x for x in market]).upper()
@@ -66,7 +66,7 @@
 #     :param orderbooks: Stream FTX orderbooks. Pass 'poll delay' as float to initialize.
 #     :param tickers: Stream FTX tickers. Pass 'poll delay' as float to initialize.
 #     :param trades: Stream FTX trades. Pass 'poll delay' as float to initialize.
-#     :return: "Concurrently" writes files to database or disk for testing
+#     :return: "Concurrently" writes files to working_db or disk for testing
 #     """
 #
 #     run_event = Event()

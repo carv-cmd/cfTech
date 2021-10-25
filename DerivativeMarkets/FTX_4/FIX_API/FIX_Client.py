@@ -237,7 +237,7 @@ class FixConnection:
 
 
 class FixClient:
-    """FIX client to use for testing."""
+    """FIX CLIENT to use for testing."""
 
     def __init__(self, url: str, client_id: str, target_id: str,
                  subaccount_name: Optional[str] = None) -> None:
@@ -366,5 +366,5 @@ class FixClient:
 # To start up:
 # secret = ''
 # api_key = ''
-# client = FixClient('tcp+ssl://fix.ftx.com:4363', target_id='FTX', client_id=api_key)
-# client.login(secret)
+# CLIENT = FixClient('tcp+ssl://fix.ftx.com:4363', target_id='FTX', client_id=api_key)
+# CLIENT.login(secret)

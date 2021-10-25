@@ -1,27 +1,32 @@
 # import signal
+import logging
 from typing import Any, Dict, List
 from threading import RLock
-# from collections import
+from string import Template
 
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
 from pymongo.errors import ConnectionFailure
 
-from MongoDatabase.monLoggers import logging, event_listeners
-
-logging.basicConfig(level=logging.INFO, format='(%(threadName)-9s) %(message)s')
+from MongoDatabase.monLoggers import event_listeners
 
 __all__ = ['MongoBroker', 'MongoServerStats']
 
+logger = logging.getLogger('MongoDatabase.monLoggers')
+
 
 class _BaseMongo(dict):
+
+    ez_log = Template('{}$msg{}'.format('\033[38;5;46m', '\033[00m'))
+    ADMIN_COLOR, RESET_COLOR = '\033[38;5;46m', '\033[00m'
 
     def __init__(self):
         super(_BaseMongo, self).__init__()
         self._root_client = None
         self._working_db = None
         self._working_col = None
+        self._locker = RLock()
 
     @property
     def root_client(self) -> MongoClient:
@@ -35,19 +40,23 @@ class _BaseMongo(dict):
     def working_col(self) -> Collection:
         return self._working_col
 
+    @property
+    def locker(self):
+        return self._locker
+
     @root_client.setter
     def root_client(self, value: str) -> None:
-        # logging.info(f'<<<SETTING.root_client[{value}]>>>')
-        assert self._root_client is None, 'MonClient instance should be closed before opening'
-        try:
-            self._root_client = MongoClient(host=value, event_listeners=event_listeners)
-            self._root_client.admin.command('ismaster')
-        except ConnectionFailure:
-            raise logging.warning("Server not available. . .")
+        if self._root_client is None:
+            try:
+                logger.info(f'{self.ADMIN_COLOR}SETTING.root_client[ip={value}, port=DEFAULT]')
+                self._root_client = MongoClient(host=value, event_listeners=event_listeners)
+                self._root_client.admin.command('ismaster')
+            except ConnectionFailure:
+                raise logger.warning("Server not available. . .")
 
     @working_db.setter
     def working_db(self, value: str):
-        # logging.info(f'<<<SETTING.working_db[{value}]>>>')
+        logger.info(f'{self.ADMIN_COLOR}SETTING.working_db[{value}]')
         assert self._root_client is not None, 'Need MongoClient.instance to reference!'
         try:
             if value is not self.working_db.name:
@@ -57,7 +66,7 @@ class _BaseMongo(dict):
 
     @working_col.setter
     def working_col(self, value: str) -> None:
-        # logging.info(f'<<<SETTING.working_col[{value}]>>>')
+        logger.info(f'{self.ADMIN_COLOR}SETTING.working_col[{value}]')
         assert self._working_db is not None, '>>> Need MongoClient.db.instance to reference!'
         try:
             if value is not self.working_col.name:
@@ -67,12 +76,17 @@ class _BaseMongo(dict):
 
 
 class MongoBroker(_BaseMongo):
+    """
+    MongoBroker provides
+    """
 
-    # __slots__ = ('_locker', 'root_client', 'working_db', 'working_col')
-
-    def __init__(self, start: bool = True, mon_ip: str = None, db_name: str = None, coll_name: str = None):
+    def __init__(self,
+                 start: bool = True,
+                 mon_ip: str = None,
+                 db_name: str = None,
+                 coll_name: str = None
+                 ):
         super(MongoBroker, self).__init__()
-        self.locker = RLock()
         if start:
             if mon_ip:
                 self.root_client = mon_ip
@@ -88,8 +102,8 @@ class MongoBroker(_BaseMongo):
 
         :return: None
         """
-        assert self.root_client is not None, 'MongoClient socket must be open before closing'
-        self.root_client.close()
+        if self.root_client is not None:
+            self.root_client.close()
 
     def mongo_drop_database(self, drop_db: Any = None, check: bool = False) -> None:
         """
@@ -124,6 +138,13 @@ class MongoBroker(_BaseMongo):
             self.working_db.drop_collection(name_or_collection=drop_col)
         else:
             raise TypeError("NoLive.db.Collection:(name|obj): PRESET|PASSED by caller ")
+
+    def mongo_drop_document(self, collection: str, del_dox: dict, check: bool = False):
+        assert check is True, f'Invalid: [check_is_True -> {check}]'
+        assert self.working_db is not None, 'Need valid MongoClient.db to reference'
+        with self.locker:
+            self.working_col = collection
+            self.working_col.find_one_and_delete(filter=del_dox)
 
     def mongo_insert_many(self, collection: str, big_dump: List) -> None:
         """
@@ -175,49 +196,47 @@ class MongoBroker(_BaseMongo):
             except Exception as e:
                 raise e
 
-    def mongo_replace_one(self, collection: str, one_dox: Dict) -> None:
-        """
-        MongoEquivalent -> db.collection.replaceOne()
-        Replaces whole documents, if document doesnt exist insert is performed
-
-        :param one_dox: dict: document to find and replace, upsert if !exist
-        :param collection: str
-        :return:
-        """
-        with self.locker:
-            try:
-                self.working_col = collection
-                _filter = {'_metrics': {'$eq': one_dox[1]}}
-                self.working_col.replace_one(filter=_filter, replacement=one_dox, upsert=True)
-            except Exception as e:
-                raise e
-
-    def mongo_drop_document(self):
-        """ TODO Implement single document drop """
-
     def mongo_bulk_write(self):
         """ TODO Implement bulkWrite/executeWrite methods """
 
     def mongo_update(self):
         """ TODO Implement updateOperators """
 
+    # def mongo_replace_one(self, collection: str, one_dox: Dict) -> None:
+    #     """
+    #     MongoEquivalent -> db.collection.replaceOne()
+    #     Replaces whole documents, if document doesnt exist insert is performed
+    #     :param one_dox: dict: document to find and replace, upsert if !exist
+    #     :param collection: str
+    #     :return:
+    #     """
+    #     with self.locker:
+    #         try:
+    #             self.working_col = collection
+    #             _filter = {'_metrics': {'$eq': one_dox[1]}}
+    #             self.working_col.replace_one(filter=_filter, replacement=one_dox, upsert=True)
+    #         except Exception as e:
+    #             raise e
+
 
 class MongoServerStats(MongoBroker):
 
+    _error = 'Connect to mongo client instance first'
+
     def get_server_info(self) -> Any:
-        assert self.root_client is not None, 'Connect to client instance first'
+        assert self.root_client is not None, self._error
         return self.root_client.server_info()
 
     def get_nodes(self) -> Any:
-        assert self.root_client is not None, 'Connect to client instance first'
+        assert self.root_client is not None, self._error
         return self.root_client.nodes
 
     def list_dbs_on_server(self) -> List:
-        assert self.root_client is not None, 'Connect to client instance first'
+        assert self.root_client is not None, self._error
         return self.root_client.list_database_names()
 
     def list_col_in_db(self) -> List:
-        assert self.working_db is not None, 'Connect to database instance first'
+        assert self.working_db is not None, self._error
         return self.working_db.list_collection_names()
 
     def mongo_command(self, cmd: str):

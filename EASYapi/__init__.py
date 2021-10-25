@@ -1,3 +1,4 @@
-from EASYapi.RESTapi import RootRequest, AioHttpREST
+# from EASYapi.aioTraceConfig import
+from EASYapi.RESTapi import AioHttpREST
 
-__all__ = ['RootRequest', 'AioHttpREST']
+__all__ = ['AioHttpREST']

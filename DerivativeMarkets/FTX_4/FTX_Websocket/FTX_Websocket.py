@@ -138,7 +138,7 @@ class WebsocketManager:
     def send_json(self, message):
         """
         Encode message as JSON and send to FTX servers
-        TODO local client server connects through gui socket IPC interface
+        TODO local CLIENT server connects through gui socket IPC interface
         """
         self._send(json.dumps(message))
 
